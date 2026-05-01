@@ -3,7 +3,10 @@ import {
   buildDmGroupAccountAllowlistAdapter,
   createNestedAllowlistOverrideResolver,
 } from "openclaw/plugin-sdk/allowlist-config-edit";
-import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
+import type {
+  ChannelAccountSnapshot,
+  ChannelMessageActionAdapter,
+} from "openclaw/plugin-sdk/channel-contract";
 import {
   buildChannelOutboundSessionRoute,
   buildThreadAwareOutboundSessionRoute,
@@ -137,6 +140,42 @@ function formatTelegramUnauthorizedTokenError(account: ResolvedTelegramAccount):
       ? "channels.telegram.botToken, channels.telegram.tokenFile, or TELEGRAM_BOT_TOKEN"
       : `channels.telegram.accounts.${account.accountId}.botToken/tokenFile`;
   return `Telegram bot token unauthorized for account "${account.accountId}" (getMe returned 401 from Telegram; source: ${source}). Update ${credentialPath} with the current BotFather token.`;
+}
+
+function startTelegramAccountProbeInBackground(params: {
+  account: ResolvedTelegramAccount;
+  token: string;
+  setStatus: (next: Omit<ChannelAccountSnapshot, "accountId">) => void;
+  log?: {
+    debug?: (message: string) => void;
+    error?: (message: string) => void;
+    info?: (message: string) => void;
+  };
+}): void {
+  const probeTelegram = resolveTelegramProbe();
+  void probeTelegram(params.token, 2500, {
+    accountId: params.account.accountId,
+    proxyUrl: params.account.config.proxy,
+    network: params.account.config.network,
+    apiRoot: params.account.config.apiRoot,
+    includeWebhookInfo: false,
+  })
+    .then((probe) => {
+      const username = probe.ok ? probe.bot?.username?.trim() : null;
+      if (username) {
+        params.log?.info?.(`[${params.account.accountId}] bot probe ok (@${username})`);
+      }
+      if (!probe.ok && probe.status === 401) {
+        const reason = formatTelegramUnauthorizedTokenError(params.account);
+        params.setStatus({ lastError: reason });
+        params.log?.error?.(`[${params.account.accountId}] ${reason}`);
+      }
+    })
+    .catch((err) => {
+      if (getTelegramRuntime().logging.shouldLogVerbose()) {
+        params.log?.debug?.(`[${params.account.accountId}] bot probe failed: ${String(err)}`);
+      }
+    });
 }
 
 function getOptionalTelegramRuntime() {
@@ -889,37 +928,17 @@ export const telegramPlugin = createChatChannelPlugin({
           throw new Error(reason);
         }
         const token = (account.token ?? "").trim();
-        let telegramBotLabel = "";
-        let unauthorizedTokenReason: string | null = null;
-        try {
-          const probe = await resolveTelegramProbe()(token, 2500, {
-            accountId: account.accountId,
-            proxyUrl: account.config.proxy,
-            network: account.config.network,
-            apiRoot: account.config.apiRoot,
-            includeWebhookInfo: false,
-          });
-          const username = probe.ok ? probe.bot?.username?.trim() : null;
-          if (username) {
-            telegramBotLabel = ` (@${username})`;
-          }
-          if (!probe.ok && probe.status === 401) {
-            unauthorizedTokenReason = formatTelegramUnauthorizedTokenError(account);
-          }
-        } catch (err) {
-          if (getTelegramRuntime().logging.shouldLogVerbose()) {
-            ctx.log?.debug?.(`[${account.accountId}] bot probe failed: ${String(err)}`);
-          }
-        }
-        if (unauthorizedTokenReason) {
-          ctx.log?.error?.(`[${account.accountId}] ${unauthorizedTokenReason}`);
-          throw new Error(unauthorizedTokenReason);
-        }
-        ctx.log?.info(`[${account.accountId}] starting provider${telegramBotLabel}`);
         const setStatus = createAccountStatusSink({
           accountId: account.accountId,
           setStatus: ctx.setStatus,
         });
+        startTelegramAccountProbeInBackground({
+          account,
+          token,
+          setStatus,
+          log: ctx.log,
+        });
+        ctx.log?.info(`[${account.accountId}] starting provider`);
         return resolveTelegramMonitor()({
           token,
           accountId: account.accountId,

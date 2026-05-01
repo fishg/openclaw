@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 describe("telegramPlugin gateway startup", () => {
-  it("stops before monitor startup when getMe rejects the token", async () => {
+  it("starts monitor without blocking on getMe token probing", async () => {
     installTelegramRuntime();
     probeTelegram.mockResolvedValue({
       ok: false,
@@ -81,16 +81,22 @@ describe("telegramPlugin gateway startup", () => {
       error: "Unauthorized",
       elapsedMs: 12,
     });
+    monitorTelegramProvider.mockResolvedValue(undefined);
 
     const { ctx, task } = startTelegramAccount("ops");
 
-    await expect(task).rejects.toThrow(
-      'Telegram bot token unauthorized for account "ops" (getMe returned 401',
+    await expect(task).resolves.toBeUndefined();
+    expect(monitorTelegramProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "123456:bad-token",
+        accountId: "ops",
+        useWebhook: false,
+      }),
     );
-    await expect(task).rejects.toThrow("channels.telegram.accounts.ops.botToken/tokenFile");
-    expect(monitorTelegramProvider).not.toHaveBeenCalled();
-    expect(ctx.log?.error).toHaveBeenCalledWith(
-      expect.stringContaining('Telegram bot token unauthorized for account "ops"'),
+    await vi.waitFor(() =>
+      expect(ctx.log?.error).toHaveBeenCalledWith(
+        expect.stringContaining('Telegram bot token unauthorized for account "ops"'),
+      ),
     );
   });
 
