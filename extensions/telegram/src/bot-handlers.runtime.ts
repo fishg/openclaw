@@ -574,15 +574,27 @@ export const registerTelegramHandlers = ({
     });
     if (!baseAccess.allowed) {
       if (baseAccess.reason === "group-disabled") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=group-disabled account=${accountId} chat=${chatId}`,
+        );
         logVerbose(`Blocked telegram group ${chatId} (group disabled)`);
         return true;
       }
       if (baseAccess.reason === "topic-disabled") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=topic-disabled account=${accountId} chat=${chatId}` +
+            ` thread=${resolvedThreadId ?? "unknown"}`,
+        );
         logVerbose(
           `Blocked telegram topic ${chatId} (${resolvedThreadId ?? "unknown"}) (topic disabled)`,
         );
         return true;
       }
+      runtime.log?.(
+        `[telegram][inbound] drop reason=group-allowFrom-override account=${accountId} chat=${chatId}` +
+          ` from=${senderId || "unknown"}` +
+          (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+      );
       logVerbose(
         `Blocked telegram group sender ${senderId || "unknown"} (group allowFrom override)`,
       );
@@ -611,26 +623,52 @@ export const registerTelegramHandlers = ({
     });
     if (!policyAccess.allowed) {
       if (policyAccess.reason === "group-policy-disabled") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=group-policy-disabled account=${accountId} chat=${chatId}`,
+        );
         logVerbose("Blocked telegram group message (groupPolicy: disabled)");
         return true;
       }
       if (policyAccess.reason === "group-policy-allowlist-no-sender") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=group-policy-allowlist-no-sender account=${accountId} chat=${chatId}` +
+            (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+        );
         logVerbose("Blocked telegram group message (no sender ID, groupPolicy: allowlist)");
         return true;
       }
       if (policyAccess.reason === "group-policy-allowlist-empty") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=group-policy-allowlist-empty account=${accountId} chat=${chatId}` +
+            ` from=${senderId || "unknown"}` +
+            (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+        );
         logVerbose(
           "Blocked telegram group message (groupPolicy: allowlist, no group allowlist entries)",
         );
         return true;
       }
       if (policyAccess.reason === "group-policy-allowlist-unauthorized") {
+        runtime.log?.(
+          `[telegram][inbound] drop reason=group-policy-allowlist-unauthorized account=${accountId} chat=${chatId}` +
+            ` from=${senderId || "unknown"}` +
+            (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+        );
         logVerbose(`Blocked telegram group message from ${senderId} (groupPolicy: allowlist)`);
         return true;
       }
+      runtime.log?.(
+        `[telegram][inbound] drop reason=group-chat-not-allowed account=${accountId} chat=${chatId}` +
+          (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+      );
       logger.info({ chatId, title: chatTitle, reason: "not-allowed" }, "skipping group message");
       return true;
     }
+    runtime.log?.(
+      `[telegram][inbound] accept account=${accountId} chat=${chatId} policy=${policyAccess.groupPolicy}` +
+        ` from=${senderId || "unknown"}` +
+        (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+    );
     return false;
   };
 
@@ -1960,6 +1998,18 @@ export const registerTelegramHandlers = ({
     // and rely on the dedicated channel_post handler for channel-originated posts.
     if (normalizedMsg.from?.id != null && normalizedMsg.from.id === ctx.me?.id) {
       return;
+    }
+    if (isGroup) {
+      runtime.log?.(
+        `[telegram][inbound] update account=${accountId} chat=${normalizedMsg.chat.id}` +
+          ` type=${normalizedMsg.chat.type}` +
+          ` from=${normalizedMsg.from?.id ?? "unknown"}` +
+          (normalizedMsg.from?.username ? ` username=${normalizedMsg.from.username}` : "") +
+          (normalizedMsg.message_thread_id != null
+            ? ` thread=${normalizedMsg.message_thread_id}`
+            : "") +
+          ` message=${normalizedMsg.message_id}`,
+      );
     }
     await handleInboundMessageLike({
       ctxForDedupe: ctx,

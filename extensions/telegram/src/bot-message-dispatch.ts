@@ -1169,9 +1169,23 @@ export const dispatchTelegramMessage = async ({
         },
       });
       if (!turnResult.dispatched) {
+        if (isGroup) {
+          runtime.log?.(
+            `[telegram][inbound] turn-not-dispatched account=${context.accountId} chat=${chatId}` +
+              ` sessionKey=${route.sessionKey}` +
+              (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+          );
+        }
         return;
       }
       ({ queuedFinal } = turnResult.dispatchResult);
+      if (isGroup) {
+        runtime.log?.(
+          `[telegram][inbound] turn-dispatched account=${context.accountId} chat=${chatId}` +
+            ` sessionKey=${route.sessionKey} queuedFinal=${queuedFinal}` +
+            (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+        );
+      }
     } catch (err) {
       dispatchError = err;
       runtime.error?.(danger(`telegram dispatch failed: ${String(err)}`));
@@ -1299,6 +1313,16 @@ export const dispatchTelegramMessage = async ({
       mediaLoader: telegramDeps.loadWebMedia,
     });
     sentFallback = result.delivered;
+    if (isGroup) {
+      runtime.log?.(
+        `[telegram][inbound] fallback-delivery account=${context.accountId} chat=${chatId}` +
+          ` sessionKey=${route.sessionKey} delivered=${sentFallback}` +
+          ` dispatchError=${Boolean(dispatchError)}` +
+          ` skippedNonSilent=${deliverySummary.skippedNonSilent}` +
+          ` failedNonSilent=${deliverySummary.failedNonSilent}` +
+          (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+      );
+    }
   }
 
   if (!queuedFinal && !sentFallback && !dispatchError && !deliverySummary.delivered) {
@@ -1321,6 +1345,15 @@ export const dispatchTelegramMessage = async ({
         mediaLoader: telegramDeps.loadWebMedia,
       });
       sentFallback = result.delivered;
+    }
+    if (isGroup) {
+      runtime.log?.(
+        `[telegram][inbound] no-visible-final account=${context.accountId} chat=${chatId}` +
+          ` sessionKey=${route.sessionKey} queuedFinal=${queuedFinal}` +
+          ` sentFallback=${sentFallback}` +
+          ` delivered=${deliverySummary.delivered}` +
+          (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+      );
     }
     silentReplyDispatchLogger.debug("telegram turn ended without visible final response", {
       hasSessionKey: Boolean(policySessionKey),

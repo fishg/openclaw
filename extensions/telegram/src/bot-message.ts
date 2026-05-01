@@ -68,12 +68,18 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
     const ingressDebugEnabled =
       shouldLogVerbose() || process.env.OPENCLAW_DEBUG_TELEGRAM_INGRESS === "1";
     const ingressContextStartMs = ingressReceivedAtMs ? Date.now() : undefined;
+    const groupInboundDiagnostic = (message: string) => {
+      runtime.log?.(`[telegram][inbound] account=${account.accountId} ${message}`);
+    };
     const context = await buildTelegramMessageContext({
       primaryCtx,
       allMedia,
       replyMedia,
       storeAllowFrom,
-      options,
+      options: {
+        ...options,
+        groupInboundDiagnostic,
+      },
       bot,
       cfg,
       account,
@@ -107,6 +113,13 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
           (options?.ingressBuffer ? ` buffer=${options.ingressBuffer}` : ""),
       );
     }
+    if (context.isGroup) {
+      runtime.log?.(
+        `[telegram][inbound] dispatch-start account=${context.accountId} chat=${context.chatId}` +
+          ` sessionKey=${context.route.sessionKey}` +
+          (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+      );
+    }
     void context.sendTyping().catch((err) => {
       logVerbose(`telegram early typing cue failed for chat ${context.chatId}: ${String(err)}`);
     });
@@ -129,8 +142,22 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
             (options?.ingressBuffer ? ` buffer=${options.ingressBuffer}` : ""),
         );
       }
+      if (context.isGroup) {
+        runtime.log?.(
+          `[telegram][inbound] dispatch-complete account=${context.accountId} chat=${context.chatId}` +
+            ` sessionKey=${context.route.sessionKey}` +
+            (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+        );
+      }
     } catch (err) {
       runtime.error?.(danger(`telegram message processing failed: ${String(err)}`));
+      if (context.isGroup) {
+        runtime.log?.(
+          `[telegram][inbound] dispatch-error account=${context.accountId} chat=${context.chatId}` +
+            ` sessionKey=${context.route.sessionKey} error=${String(err)}` +
+            (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
+        );
+      }
       try {
         await bot.api.sendMessage(
           context.chatId,

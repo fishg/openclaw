@@ -273,6 +273,10 @@ export async function resolveTelegramInboundBody(params: {
   const wasMentioned = options?.forceWasMentioned === true ? true : computedWasMentioned;
 
   if (isGroup && commandGate.shouldBlock) {
+    options?.groupInboundDiagnostic?.(
+      `drop reason=control-command-unauthorized chat=${chatId} from=${senderId || "unknown"}` +
+        (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : ""),
+    );
     logInboundDrop({
       log: logVerbose,
       channel: "telegram",
@@ -309,6 +313,12 @@ export async function resolveTelegramInboundBody(params: {
   });
   const effectiveWasMentioned = mentionDecision.effectiveWasMentioned;
   if (isGroup && requireMention && canDetectMention && mentionDecision.shouldSkip) {
+    options?.groupInboundDiagnostic?.(
+      `drop reason=no-mention chat=${chatId} from=${senderId || "unknown"}` +
+        (resolvedThreadId != null ? ` thread=${resolvedThreadId}` : "") +
+        ` canDetectMention=${canDetectMention} hasAnyMention=${hasAnyMention}` +
+        ` effectiveWasMentioned=${effectiveWasMentioned}`,
+    );
     logger.info({ chatId, reason: "no-mention" }, "skipping group message");
     recordPendingHistoryEntryIfEnabled({
       historyMap: groupHistories,

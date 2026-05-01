@@ -21,6 +21,7 @@ export type TelegramMessageContextOptions = {
   messageIdOverride?: string;
   receivedAtMs?: number;
   ingressBuffer?: "inbound-debounce" | "text-fragment";
+  groupInboundDiagnostic?: (message: string) => void;
 };
 
 export type TelegramLogger = {
