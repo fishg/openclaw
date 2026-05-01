@@ -1,6 +1,8 @@
+import { performance } from "node:perf_hooks";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
+import { createSubsystemLogger } from "../logging.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
@@ -49,6 +51,26 @@ const defaultOpenClawToolsDeps: OpenClawToolsDeps = {
 };
 
 let openClawToolsDeps: OpenClawToolsDeps = defaultOpenClawToolsDeps;
+const openClawToolsDiagLog = createSubsystemLogger("agent/openclaw-tools");
+
+function measureOpenClawToolsStep<T>(
+  segments: Record<string, number>,
+  name: string,
+  fn: () => T,
+): T {
+  const startedAtMs = performance.now();
+  try {
+    return fn();
+  } finally {
+    segments[name] = (segments[name] ?? 0) + performance.now() - startedAtMs;
+  }
+}
+
+function formatTimingSegments(segments: Record<string, number>): string {
+  return Object.entries(segments)
+    .map(([name, durationMs]) => `${name}:${Math.round(durationMs)}ms`)
+    .join(",");
+}
 
 export function createOpenClawTools(
   options?: {
@@ -116,125 +138,184 @@ export function createOpenClawTools(
     allowGatewaySubagentBinding?: boolean;
   } & SpawnedToolContext,
 ): AnyAgentTool[] {
+  const startedAtMs = performance.now();
+  const preludeSegments: Record<string, number> = {};
   const resolvedConfig = options?.config ?? openClawToolsDeps.config;
-  const { sessionAgentId } = resolveSessionAgentIds({
-    sessionKey: options?.agentSessionKey,
-    config: resolvedConfig,
-    agentId: options?.requesterAgentIdOverride,
-  });
+  const { sessionAgentId } = measureOpenClawToolsStep(
+    preludeSegments,
+    "resolveSessionAgentIds",
+    () =>
+      resolveSessionAgentIds({
+        sessionKey: options?.agentSessionKey,
+        config: resolvedConfig,
+        agentId: options?.requesterAgentIdOverride,
+      }),
+  );
   // Fall back to the session agent workspace so plugin loading stays workspace-stable
   // even when a caller forgets to thread workspaceDir explicitly.
   const inferredWorkspaceDir =
     options?.workspaceDir || !resolvedConfig
       ? undefined
-      : resolveAgentWorkspaceDir(resolvedConfig, sessionAgentId);
-  const workspaceDir = resolveWorkspaceRoot(options?.workspaceDir ?? inferredWorkspaceDir);
-  const spawnWorkspaceDir = resolveWorkspaceRoot(
-    options?.spawnWorkspaceDir ?? options?.workspaceDir ?? inferredWorkspaceDir,
+      : measureOpenClawToolsStep(preludeSegments, "resolveAgentWorkspaceDir", () =>
+          resolveAgentWorkspaceDir(resolvedConfig, sessionAgentId),
+        );
+  const workspaceDir = measureOpenClawToolsStep(preludeSegments, "resolveWorkspaceRoot", () =>
+    resolveWorkspaceRoot(options?.workspaceDir ?? inferredWorkspaceDir),
   );
-  const deliveryContext = normalizeDeliveryContext({
-    channel: options?.agentChannel,
-    to: options?.agentTo,
-    accountId: options?.agentAccountId,
-    threadId: options?.agentThreadId,
-  });
-  const runtimeWebTools = getActiveRuntimeWebToolsMetadata();
+  const spawnWorkspaceDir = measureOpenClawToolsStep(
+    preludeSegments,
+    "resolveSpawnWorkspaceRoot",
+    () =>
+      resolveWorkspaceRoot(
+        options?.spawnWorkspaceDir ?? options?.workspaceDir ?? inferredWorkspaceDir,
+      ),
+  );
+  const deliveryContext = measureOpenClawToolsStep(
+    preludeSegments,
+    "normalizeDeliveryContext",
+    () =>
+      normalizeDeliveryContext({
+        channel: options?.agentChannel,
+        to: options?.agentTo,
+        accountId: options?.agentAccountId,
+        threadId: options?.agentThreadId,
+      }),
+  );
+  const runtimeWebTools = measureOpenClawToolsStep(
+    preludeSegments,
+    "getActiveRuntimeWebToolsMetadata",
+    getActiveRuntimeWebToolsMetadata,
+  );
   const sandbox =
     options?.sandboxRoot && options?.sandboxFsBridge
       ? { root: options.sandboxRoot, bridge: options.sandboxFsBridge }
       : undefined;
   const imageTool = options?.agentDir?.trim()
-    ? createImageTool({
+    ? measureOpenClawToolsStep(preludeSegments, "createImageTool", () =>
+        createImageTool({
+          config: options?.config,
+          agentDir: options.agentDir,
+          workspaceDir,
+          sandbox,
+          fsPolicy: options?.fsPolicy,
+          modelHasVision: options?.modelHasVision,
+        }),
+      )
+    : null;
+  const imageGenerateTool = measureOpenClawToolsStep(
+    preludeSegments,
+    "createImageGenerateTool",
+    () =>
+      createImageGenerateTool({
         config: options?.config,
-        agentDir: options.agentDir,
+        agentDir: options?.agentDir,
         workspaceDir,
         sandbox,
         fsPolicy: options?.fsPolicy,
-        modelHasVision: options?.modelHasVision,
-      })
-    : null;
-  const imageGenerateTool = createImageGenerateTool({
-    config: options?.config,
-    agentDir: options?.agentDir,
-    workspaceDir,
-    sandbox,
-    fsPolicy: options?.fsPolicy,
-  });
-  const videoGenerateTool = createVideoGenerateTool({
-    config: options?.config,
-    agentDir: options?.agentDir,
-    agentSessionKey: options?.agentSessionKey,
-    requesterOrigin: deliveryContext ?? undefined,
-    workspaceDir,
-    sandbox,
-    fsPolicy: options?.fsPolicy,
-  });
-  const musicGenerateTool = createMusicGenerateTool({
-    config: options?.config,
-    agentDir: options?.agentDir,
-    agentSessionKey: options?.agentSessionKey,
-    requesterOrigin: deliveryContext ?? undefined,
-    workspaceDir,
-    sandbox,
-    fsPolicy: options?.fsPolicy,
-  });
+      }),
+  );
+  const videoGenerateTool = measureOpenClawToolsStep(
+    preludeSegments,
+    "createVideoGenerateTool",
+    () =>
+      createVideoGenerateTool({
+        config: options?.config,
+        agentDir: options?.agentDir,
+        agentSessionKey: options?.agentSessionKey,
+        requesterOrigin: deliveryContext ?? undefined,
+        workspaceDir,
+        sandbox,
+        fsPolicy: options?.fsPolicy,
+      }),
+  );
+  const musicGenerateTool = measureOpenClawToolsStep(
+    preludeSegments,
+    "createMusicGenerateTool",
+    () =>
+      createMusicGenerateTool({
+        config: options?.config,
+        agentDir: options?.agentDir,
+        agentSessionKey: options?.agentSessionKey,
+        requesterOrigin: deliveryContext ?? undefined,
+        workspaceDir,
+        sandbox,
+        fsPolicy: options?.fsPolicy,
+      }),
+  );
   const pdfTool = options?.agentDir?.trim()
-    ? createPdfTool({
-        config: options?.config,
-        agentDir: options.agentDir,
-        workspaceDir,
-        sandbox,
-        fsPolicy: options?.fsPolicy,
-      })
+    ? measureOpenClawToolsStep(preludeSegments, "createPdfTool", () =>
+        createPdfTool({
+          config: options?.config,
+          agentDir: options.agentDir,
+          workspaceDir,
+          sandbox,
+          fsPolicy: options?.fsPolicy,
+        }),
+      )
     : null;
-  const webSearchTool = createWebSearchTool({
-    config: options?.config,
-    sandboxed: options?.sandboxed,
-    runtimeWebSearch: runtimeWebTools?.search,
-  });
-  const webFetchTool = createWebFetchTool({
-    config: options?.config,
-    sandboxed: options?.sandboxed,
-    runtimeWebFetch: runtimeWebTools?.fetch,
-  });
+  const webSearchTool = measureOpenClawToolsStep(preludeSegments, "createWebSearchTool", () =>
+    createWebSearchTool({
+      config: options?.config,
+      sandboxed: options?.sandboxed,
+      runtimeWebSearch: runtimeWebTools?.search,
+    }),
+  );
+  const webFetchTool = measureOpenClawToolsStep(preludeSegments, "createWebFetchTool", () =>
+    createWebFetchTool({
+      config: options?.config,
+      sandboxed: options?.sandboxed,
+      runtimeWebFetch: runtimeWebTools?.fetch,
+    }),
+  );
   const messageTool = options?.disableMessageTool
     ? null
-    : createMessageTool({
-        agentAccountId: options?.agentAccountId,
-        agentSessionKey: options?.agentSessionKey,
-        sessionId: options?.sessionId,
-        config: options?.config,
-        currentChannelId: options?.currentChannelId,
-        currentChannelProvider: options?.agentChannel,
-        currentThreadTs: options?.currentThreadTs,
-        currentMessageId: options?.currentMessageId,
-        replyToMode: options?.replyToMode,
-        hasRepliedRef: options?.hasRepliedRef,
-        sandboxRoot: options?.sandboxRoot,
-        requireExplicitTarget: options?.requireExplicitMessageTarget,
-        requesterSenderId: options?.requesterSenderId ?? undefined,
-        senderIsOwner: options?.senderIsOwner,
-      });
-  const nodesToolBase = createNodesTool({
-    agentSessionKey: options?.agentSessionKey,
-    agentChannel: options?.agentChannel,
-    agentAccountId: options?.agentAccountId,
-    currentChannelId: options?.currentChannelId,
-    currentThreadTs: options?.currentThreadTs,
-    config: options?.config,
-    modelHasVision: options?.modelHasVision,
-    allowMediaInvokeCommands: options?.allowMediaInvokeCommands,
-  });
-  const nodesTool = applyNodesToolWorkspaceGuard(nodesToolBase, {
-    fsPolicy: options?.fsPolicy,
-    sandboxContainerWorkdir: options?.sandboxContainerWorkdir,
-    sandboxRoot: options?.sandboxRoot,
-    workspaceDir,
-  });
-  const embedded = isEmbeddedMode();
+    : measureOpenClawToolsStep(preludeSegments, "createMessageTool", () =>
+        createMessageTool({
+          agentAccountId: options?.agentAccountId,
+          agentSessionKey: options?.agentSessionKey,
+          sessionId: options?.sessionId,
+          config: options?.config,
+          currentChannelId: options?.currentChannelId,
+          currentChannelProvider: options?.agentChannel,
+          currentThreadTs: options?.currentThreadTs,
+          currentMessageId: options?.currentMessageId,
+          replyToMode: options?.replyToMode,
+          hasRepliedRef: options?.hasRepliedRef,
+          sandboxRoot: options?.sandboxRoot,
+          requireExplicitTarget: options?.requireExplicitMessageTarget,
+          requesterSenderId: options?.requesterSenderId ?? undefined,
+          senderIsOwner: options?.senderIsOwner,
+        }),
+      );
+  const nodesToolBase = measureOpenClawToolsStep(preludeSegments, "createNodesTool", () =>
+    createNodesTool({
+      agentSessionKey: options?.agentSessionKey,
+      agentChannel: options?.agentChannel,
+      agentAccountId: options?.agentAccountId,
+      currentChannelId: options?.currentChannelId,
+      currentThreadTs: options?.currentThreadTs,
+      config: options?.config,
+      modelHasVision: options?.modelHasVision,
+      allowMediaInvokeCommands: options?.allowMediaInvokeCommands,
+    }),
+  );
+  const nodesTool = measureOpenClawToolsStep(preludeSegments, "applyNodesToolWorkspaceGuard", () =>
+    applyNodesToolWorkspaceGuard(nodesToolBase, {
+      fsPolicy: options?.fsPolicy,
+      sandboxContainerWorkdir: options?.sandboxContainerWorkdir,
+      sandboxRoot: options?.sandboxRoot,
+      workspaceDir,
+    }),
+  );
+  const embedded = measureOpenClawToolsStep(preludeSegments, "isEmbeddedMode", isEmbeddedMode);
   const effectiveCallGateway = embedded
-    ? createEmbeddedCallGateway()
+    ? measureOpenClawToolsStep(
+        preludeSegments,
+        "createEmbeddedCallGateway",
+        createEmbeddedCallGateway,
+      )
     : openClawToolsDeps.callGateway;
+  const coreToolsStartedAtMs = performance.now();
   const tools: AnyAgentTool[] = [
     ...(embedded
       ? []
@@ -335,16 +416,35 @@ export function createOpenClawTools(
     }),
     ...collectPresentOpenClawTools([webSearchTool, webFetchTool, imageTool, pdfTool]),
   ];
+  const coreToolsDurationMs = performance.now() - coreToolsStartedAtMs;
 
   if (options?.disablePluginTools) {
     return tools;
   }
 
+  const pluginToolsStartedAtMs = performance.now();
   const wrappedPluginTools = resolveOpenClawPluginToolsForOptions({
     options,
     resolvedConfig,
     existingToolNames: new Set(tools.map((tool) => tool.name)),
   });
+  const pluginToolsDurationMs = performance.now() - pluginToolsStartedAtMs;
+  const totalDurationMs = performance.now() - startedAtMs;
+  const preludeDurationMs = Math.max(
+    0,
+    totalDurationMs - coreToolsDurationMs - pluginToolsDurationMs,
+  );
+  if (totalDurationMs >= 1_000 || pluginToolsDurationMs >= 1_000) {
+    openClawToolsDiagLog.warn(
+      `[openclaw-tools-diag] totalMs=${Math.round(totalDurationMs)} preludeMs=${Math.round(
+        preludeDurationMs,
+      )} coreToolsMs=${Math.round(
+        coreToolsDurationMs,
+      )} pluginToolsMs=${Math.round(pluginToolsDurationMs)} preludeSegments=${formatTimingSegments(
+        preludeSegments,
+      )} coreCount=${tools.length} pluginCount=${wrappedPluginTools.length}`,
+    );
+  }
 
   return [...tools, ...wrappedPluginTools];
 }

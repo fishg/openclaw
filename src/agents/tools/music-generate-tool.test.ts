@@ -129,9 +129,9 @@ describe("createMusicGenerateTool", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns null when no music-generation config or auth-backed provider is available", () => {
+  it("registers lazily when no music-generation config or auth-backed provider is available", () => {
     vi.spyOn(musicGenerationRuntime, "listRuntimeMusicGenerationProviders").mockReturnValue([]);
-    expect(createMusicGenerateTool({ config: asConfig({}) })).toBeNull();
+    expect(createMusicGenerateTool({ config: asConfig({}) })?.name).toBe("music_generate");
   });
 
   it("registers when music-generation config is present", () => {

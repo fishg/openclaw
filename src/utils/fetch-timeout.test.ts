@@ -32,7 +32,7 @@ describe("buildTimeoutAbortSignal", () => {
     expect(signal?.aborted).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      "fetch timeout reached; aborting operation",
+      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=unit-test url=https://example.com/v1/responses",
       expect.objectContaining({
         timeoutMs: 25,
         operation: "unit-test",
@@ -53,9 +53,28 @@ describe("buildTimeoutAbortSignal", () => {
     await vi.advanceTimersByTimeAsync(25);
 
     expect(warn).toHaveBeenCalledWith(
-      "fetch timeout reached; aborting operation",
+      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=unit-test url=/api/responses",
       expect.objectContaining({
         url: "/api/responses",
+      }),
+    );
+
+    cleanup();
+  });
+
+  it("redacts Telegram bot tokens embedded in timeout URL paths", async () => {
+    const { cleanup } = buildTimeoutAbortSignal({
+      timeoutMs: 25,
+      operation: "telegram.getMe",
+      url: "https://api.telegram.org/bot123456:secret-token/getMe",
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    expect(warn).toHaveBeenCalledWith(
+      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=telegram.getMe url=https://api.telegram.org/bot-redacted/getMe",
+      expect.objectContaining({
+        url: "https://api.telegram.org/bot-redacted/getMe",
       }),
     );
 

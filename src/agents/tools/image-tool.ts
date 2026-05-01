@@ -380,13 +380,6 @@ export function createImageTool(options?: {
     }
     return null;
   }
-  const imageModelConfig = resolveImageModelConfigForTool({
-    cfg: options?.config,
-    agentDir,
-  });
-  if (!imageModelConfig) {
-    return null;
-  }
   const remoteMediaSsrfPolicy = resolveRemoteMediaSsrfPolicy(options?.config);
 
   // If model has native vision, images in the prompt are auto-injected
@@ -413,6 +406,13 @@ export function createImageTool(options?: {
     }),
     execute: async (_toolCallId, args) => {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+      const imageModelConfig = resolveImageModelConfigForTool({
+        cfg: options?.config,
+        agentDir,
+      });
+      if (!imageModelConfig) {
+        throw new Error("No image model configured.");
+      }
 
       // MARK: - Normalize image + images input and dedupe while preserving order
       const imageCandidates: string[] = [];

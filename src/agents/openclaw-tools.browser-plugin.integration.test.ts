@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { activateSecretsRuntimeSnapshot, clearSecretsRuntimeSnapshot } from "../secrets/runtime.js";
-import { resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
+import { __testing, resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
 
 const hoisted = vi.hoisted(() => ({
   resolvePluginTools: vi.fn(),
@@ -15,6 +15,7 @@ describe("createOpenClawTools browser plugin integration", () => {
   afterEach(() => {
     hoisted.resolvePluginTools.mockReset();
     clearSecretsRuntimeSnapshot();
+    __testing.clearPluginToolsCache();
   });
 
   it("keeps the browser tool returned by plugin resolution", () => {
@@ -263,5 +264,51 @@ describe("createOpenClawTools browser plugin integration", () => {
 
     expect(getRuntimeConfig?.()).toStrictEqual(nextRuntimeConfig);
     expect(getRuntimeConfig?.()?.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
+  });
+
+  it("reuses cached plugin tools for the same session context", () => {
+    hoisted.resolvePluginTools.mockReturnValue([
+      {
+        name: "browser",
+        description: "browser fixture tool",
+        parameters: {
+          type: "object",
+          properties: {},
+        },
+        async execute() {
+          return {
+            content: [{ type: "text", text: "ok" }],
+          };
+        },
+      },
+    ]);
+
+    const config = {
+      plugins: {
+        allow: ["browser"],
+      },
+    } as OpenClawConfig;
+
+    const first = resolveOpenClawPluginToolsForOptions({
+      options: {
+        config,
+        agentSessionKey: "agent:main:telegram:main:direct:706271968",
+        agentChannel: "telegram",
+        agentTo: "706271968",
+      },
+      resolvedConfig: config,
+    });
+    const second = resolveOpenClawPluginToolsForOptions({
+      options: {
+        config,
+        agentSessionKey: "agent:main:telegram:main:direct:706271968",
+        agentChannel: "telegram",
+        agentTo: "706271968",
+      },
+      resolvedConfig: config,
+    });
+
+    expect(first).toBe(second);
+    expect(hoisted.resolvePluginTools).toHaveBeenCalledTimes(1);
   });
 });

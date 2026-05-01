@@ -257,11 +257,6 @@ export function createPdfTool(options?: {
     return null;
   }
 
-  const pdfModelConfig = resolvePdfModelConfigForTool({ cfg: options?.config, agentDir });
-  if (!pdfModelConfig) {
-    return null;
-  }
-
   const maxBytesMbDefault = (
     options?.config?.agents?.defaults as Record<string, unknown> | undefined
   )?.pdfMaxBytesMb;
@@ -287,6 +282,10 @@ export function createPdfTool(options?: {
     parameters: PdfToolSchema,
     execute: async (_toolCallId, args) => {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+      const pdfModelConfig = resolvePdfModelConfigForTool({ cfg: options?.config, agentDir });
+      if (!pdfModelConfig) {
+        throw new Error("No PDF model configured.");
+      }
 
       // MARK: - Normalize pdf + pdfs input
       const pdfInputs = resolvePdfInputs(record);

@@ -3,6 +3,8 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 const log = createSubsystemLogger("fetch-timeout");
 const LOG_URL_MAX_CHARS = 500;
 const URL_SECRET_SUFFIX_PATTERN = /[?#]/;
+const TELEGRAM_BOT_TOKEN_PATH_PATTERN = /\/bot[^/?#/]*/gi;
+const TELEGRAM_BOT_TOKEN_REDACTION = "/bot-redacted";
 
 type TimeoutAbortSignalParams = {
   timeoutMs?: number;
@@ -33,12 +35,19 @@ function sanitizeTimeoutLogUrl(rawUrl: string | undefined): string | undefined {
     const parsed = new URL(trimmed);
     parsed.username = "";
     parsed.password = "";
+    parsed.pathname = parsed.pathname.replace(
+      TELEGRAM_BOT_TOKEN_PATH_PATTERN,
+      TELEGRAM_BOT_TOKEN_REDACTION,
+    );
     parsed.search = "";
     parsed.hash = "";
     const value = parsed.toString();
     return value.length > LOG_URL_MAX_CHARS ? `${value.slice(0, LOG_URL_MAX_CHARS)}...` : value;
   } catch {
-    const withoutQueryOrHash = trimmed.split(URL_SECRET_SUFFIX_PATTERN, 1)[0] ?? "";
+    const withoutQueryOrHash =
+      trimmed
+        .split(URL_SECRET_SUFFIX_PATTERN, 1)[0]
+        ?.replace(TELEGRAM_BOT_TOKEN_PATH_PATTERN, TELEGRAM_BOT_TOKEN_REDACTION) ?? "";
     const cleaned = withoutQueryOrHash
       .replace(/[\r\n\u2028\u2029]+/g, " ")
       .replace(/\p{Cc}+/gu, " ")
@@ -53,6 +62,24 @@ function sanitizeTimeoutLogUrl(rawUrl: string | undefined): string | undefined {
   }
 }
 
+function formatTimeoutLogMessage(params: {
+  timeoutMs: number;
+  elapsedMs: number;
+  operation?: string;
+  url?: string;
+}): string {
+  const parts = [
+    "fetch timeout reached; aborting operation",
+    `timeoutMs=${params.timeoutMs}`,
+    `elapsedMs=${params.elapsedMs}`,
+    `operation=${params.operation?.trim() || "unknown"}`,
+  ];
+  if (params.url) {
+    parts.push(`url=${params.url}`);
+  }
+  return parts.join(" ");
+}
+
 function abortDueToTimeout(
   controller: AbortController,
   timeoutMs: number,
@@ -64,9 +91,10 @@ function abortDueToTimeout(
     return;
   }
   const sanitizedUrl = sanitizeTimeoutLogUrl(url);
-  log.warn("fetch timeout reached; aborting operation", {
+  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  log.warn(formatTimeoutLogMessage({ timeoutMs, elapsedMs, operation, url: sanitizedUrl }), {
     timeoutMs,
-    elapsedMs: Math.max(0, Date.now() - startedAtMs),
+    elapsedMs,
     ...(operation ? { operation } : {}),
     ...(sanitizedUrl ? { url: sanitizedUrl } : {}),
   });

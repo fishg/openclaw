@@ -654,6 +654,29 @@ describe("installBundledRuntimeDeps", () => {
     expect(written.dependencies).toEqual({});
   });
 
+  it("accepts package.json dependency supersets when checking materialized runtime deps", () => {
+    const installRoot = makeTempDir();
+    writeInstalledPackage(installRoot, "alpha-runtime", "1.0.0");
+    writeInstalledPackage(installRoot, "beta-runtime", "2.0.0");
+    fs.writeFileSync(
+      path.join(installRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "openclaw-runtime-stage",
+          private: true,
+          dependencies: {
+            "alpha-runtime": "1.0.0",
+            "beta-runtime": "2.0.0",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    expect(isRuntimeDepsPlanMaterialized(installRoot, ["alpha-runtime@1.0.0"])).toBe(true);
+  });
+
   it("repairs external install roots from the complete generated dependency plan", async () => {
     const installRoot = makeTempDir();
     writeInstalledPackage(installRoot, "alpha-runtime", "1.0.0");

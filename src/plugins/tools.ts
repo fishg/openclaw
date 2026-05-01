@@ -1,5 +1,7 @@
+import { performance } from "node:perf_hooks";
 import { normalizeToolName } from "../agents/tool-policy.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
+import { createSubsystemLogger } from "../logging.js";
 import { applyTestPluginDefaults, normalizePluginsConfig } from "./config-state.js";
 import { resolveRuntimePluginRegistry, type PluginLoadOptions } from "./loader.js";
 import {
@@ -19,6 +21,7 @@ export type PluginToolMeta = {
 };
 
 const pluginToolMeta = new WeakMap<AnyAgentTool, PluginToolMeta>();
+const pluginToolsDiagLog = createSubsystemLogger("plugins/tools");
 
 export function setPluginToolMeta(tool: AnyAgentTool, meta: PluginToolMeta): void {
   pluginToolMeta.set(tool, meta);
@@ -97,15 +100,29 @@ function describeMalformedPluginTool(tool: unknown): string | undefined {
 function resolvePluginToolRegistry(params: {
   loadOptions: PluginLoadOptions;
   allowGatewaySubagentBinding?: boolean;
-}) {
+}): {
+  registry:
+    | ReturnType<typeof getActivePluginRegistry>
+    | ReturnType<typeof resolveRuntimePluginRegistry>;
+  source: "active-gateway-bindable" | "runtime-registry";
+} {
   if (
     params.allowGatewaySubagentBinding &&
     getActivePluginRegistryKey() &&
     getActivePluginRuntimeSubagentMode() === "gateway-bindable"
   ) {
-    return getActivePluginRegistry() ?? resolveRuntimePluginRegistry(params.loadOptions);
+    const activeRegistry = getActivePluginRegistry();
+    if (activeRegistry) {
+      return {
+        registry: activeRegistry,
+        source: "active-gateway-bindable",
+      };
+    }
   }
-  return resolveRuntimePluginRegistry(params.loadOptions);
+  return {
+    registry: resolveRuntimePluginRegistry(params.loadOptions),
+    source: "runtime-registry",
+  };
 }
 
 export function resolvePluginTools(params: {
@@ -116,6 +133,7 @@ export function resolvePluginTools(params: {
   allowGatewaySubagentBinding?: boolean;
   env?: NodeJS.ProcessEnv;
 }): AnyAgentTool[] {
+  const startedAtMs = performance.now();
   // Fast path: when plugins are effectively disabled, avoid discovery/jiti entirely.
   // This matters a lot for unit tests and for tool construction hot paths.
   const env = params.env ?? process.env;
@@ -130,17 +148,22 @@ export function resolvePluginTools(params: {
     return [];
   }
 
-  const runtimeOptions = params.allowGatewaySubagentBinding
+  const allowGatewaySubagentBinding =
+    params.allowGatewaySubagentBinding === true ||
+    getActivePluginRuntimeSubagentMode() === "gateway-bindable";
+  const runtimeOptions = allowGatewaySubagentBinding
     ? { allowGatewaySubagentBinding: true as const }
     : undefined;
   const loadOptions = buildPluginRuntimeLoadOptions(context, {
     installBundledRuntimeDeps: false,
     runtimeOptions,
   });
-  const registry = resolvePluginToolRegistry({
+  const registryStartedAtMs = performance.now();
+  const { registry, source: registrySource } = resolvePluginToolRegistry({
     loadOptions,
-    allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
+    allowGatewaySubagentBinding,
   });
+  const registryResolvedAtMs = performance.now();
   if (!registry) {
     return [];
   }
@@ -150,6 +173,7 @@ export function resolvePluginTools(params: {
   const existingNormalized = new Set(Array.from(existing, (tool) => normalizeToolName(tool)));
   const allowlist = normalizeAllowlist(params.toolAllowlist);
   const blockedPlugins = new Set<string>();
+  const factoryTimings: Array<{ pluginId: string; names: string[]; durationMs: number }> = [];
 
   for (const entry of registry.tools) {
     if (blockedPlugins.has(entry.pluginId)) {
@@ -171,11 +195,18 @@ export function resolvePluginTools(params: {
       continue;
     }
     let resolved: AnyAgentTool | AnyAgentTool[] | null | undefined = null;
+    const factoryStartedAtMs = performance.now();
     try {
       resolved = entry.factory(params.context);
     } catch (err) {
       context.logger.error(`plugin tool failed (${entry.pluginId}): ${String(err)}`);
       continue;
+    } finally {
+      factoryTimings.push({
+        pluginId: entry.pluginId,
+        names: entry.names,
+        durationMs: performance.now() - factoryStartedAtMs,
+      });
     }
     if (!resolved) {
       if (entry.names.length > 0) {
@@ -236,6 +267,26 @@ export function resolvePluginTools(params: {
       });
       tools.push(tool);
     }
+  }
+
+  const totalDurationMs = performance.now() - startedAtMs;
+  const registryDurationMs = registryResolvedAtMs - registryStartedAtMs;
+  if (totalDurationMs >= 1_000 || registryDurationMs >= 1_000) {
+    const slowestFactories = [...factoryTimings]
+      .sort((left, right) => right.durationMs - left.durationMs)
+      .slice(0, 8)
+      .map((entry) => ({
+        pluginId: entry.pluginId,
+        names: entry.names,
+        durationMs: Math.round(entry.durationMs),
+      }));
+    pluginToolsDiagLog.warn(
+      `[plugin-tools-diag] totalMs=${Math.round(totalDurationMs)} registryMs=${Math.round(
+        registryDurationMs,
+      )} registrySource=${registrySource} registeredTools=${registry.tools.length} resolvedTools=${tools.length} topFactories=${JSON.stringify(
+        slowestFactories,
+      )}`,
+    );
   }
 
   return tools;

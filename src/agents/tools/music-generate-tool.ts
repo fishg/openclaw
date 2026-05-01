@@ -33,7 +33,6 @@ import {
   applyMusicGenerationModelConfigDefaults,
   buildMediaReferenceDetails,
   buildTaskRunDetails,
-  hasGenerationToolAvailability,
   normalizeMediaReferenceInputs,
   readBooleanToolParam,
   readGenerationTimeoutMs,
@@ -312,6 +311,8 @@ async function loadReferenceImages(params: {
         : await (async () => {
             const { signal, cleanup } = buildTimeoutAbortSignal({
               timeoutMs: params.timeoutMs ?? DEFAULT_REFERENCE_FETCH_TIMEOUT_MS,
+              operation: "music-generate.reference-fetch",
+              url: resolvedPath ?? resolvedInput,
             });
             try {
               return await loadWebMedia(resolvedPath ?? resolvedInput, {
@@ -496,18 +497,6 @@ export function createMusicGenerateTool(options?: {
   scheduleBackgroundWork?: MusicGenerateBackgroundScheduler;
 }): AnyAgentTool | null {
   const cfg: OpenClawConfig = options?.config ?? getRuntimeConfig();
-  if (
-    !hasGenerationToolAvailability({
-      cfg,
-      agentDir: options?.agentDir,
-      modelConfig: cfg.agents?.defaults?.musicGenerationModel,
-      providers: () => listRuntimeMusicGenerationProviders({ config: cfg }),
-      providerKey: "musicGenerationProviders",
-    })
-  ) {
-    return null;
-  }
-
   const sandboxConfig = options?.sandbox
     ? {
         root: options.sandbox.root,

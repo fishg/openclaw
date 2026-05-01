@@ -36,7 +36,6 @@ import {
   applyVideoGenerationModelConfigDefaults,
   buildMediaReferenceDetails,
   buildTaskRunDetails,
-  hasGenerationToolAvailability,
   normalizeMediaReferenceInputs,
   readBooleanToolParam,
   readGenerationTimeoutMs,
@@ -803,18 +802,6 @@ export function createVideoGenerateTool(options?: {
   scheduleBackgroundWork?: VideoGenerateBackgroundScheduler;
 }): AnyAgentTool | null {
   const cfg: OpenClawConfig = options?.config ?? getRuntimeConfig();
-  if (
-    !hasGenerationToolAvailability({
-      cfg,
-      agentDir: options?.agentDir,
-      modelConfig: cfg.agents?.defaults?.videoGenerationModel,
-      providers: () => listRuntimeVideoGenerationProviders({ config: cfg }),
-      providerKey: "videoGenerationProviders",
-    })
-  ) {
-    return null;
-  }
-
   const sandboxConfig = options?.sandbox
     ? {
         root: options.sandbox.root,

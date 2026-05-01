@@ -93,10 +93,10 @@ describe("createVideoGenerateTool", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns null when no video-generation config or auth-backed provider is available", () => {
+  it("registers lazily when no video-generation config or auth-backed provider is available", () => {
     vi.spyOn(videoGenerationRuntime, "listRuntimeVideoGenerationProviders").mockReturnValue([]);
 
-    expect(createVideoGenerateTool({ config: asConfig({}) })).toBeNull();
+    expect(createVideoGenerateTool({ config: asConfig({}) })?.name).toBe("video_generate");
   });
 
   it("registers when video-generation config is present", () => {
