@@ -180,9 +180,6 @@ export function resolvePdfModelConfigForTool(params: {
   const now = Date.now();
   const cached = pdfToolModelConfigCache.get(cacheIdentity.cacheKey);
   if (cached && cached.expiresAt > now) {
-    log.warn(
-      `[trace:pdf-tool] model-config-cache hit config=${cacheIdentity.configKey} workspace=${cacheIdentity.workspaceIdentity || "-"} auth=${cacheIdentity.authFingerprint}`,
-    );
     return cached.value ? { ...cached.value } : null;
   }
   log.warn(
