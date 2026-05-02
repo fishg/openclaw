@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
@@ -9,18 +12,32 @@ import { resetPdfToolAuthEnv } from "./pdf-tool.test-support.js";
 const ANTHROPIC_PDF_MODEL = "anthropic/claude-opus-4-7";
 const TEST_AGENT_DIR = "/tmp/openclaw-pdf-model-config";
 const hoisted = vi.hoisted(() => ({
-  hasAuthForProviderMock: vi.fn(({ provider }: { provider: string }) => {
-    if (provider === "anthropic") {
-      return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_OAUTH_TOKEN);
-    }
-    if (provider === "openai") {
-      return Boolean(process.env.OPENAI_API_KEY);
-    }
-    if (provider === "google") {
-      return Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
-    }
-    return false;
-  }),
+  hasAuthForProviderMock: vi.fn(
+    ({
+      provider,
+      authStore,
+    }: {
+      provider: string;
+      authStore?: { profiles?: Record<string, { provider: string }> };
+    }) => {
+      const hasStoreProvider = Object.values(authStore?.profiles ?? {}).some(
+        (profile) => profile.provider === provider,
+      );
+      if (hasStoreProvider) {
+        return true;
+      }
+      if (provider === "anthropic") {
+        return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_OAUTH_TOKEN);
+      }
+      if (provider === "openai") {
+        return Boolean(process.env.OPENAI_API_KEY);
+      }
+      if (provider === "google") {
+        return Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
+      }
+      return false;
+    },
+  ),
 }));
 
 vi.mock("./model-config.helpers.js", () => ({
@@ -130,5 +147,65 @@ describe("resolvePdfModelConfigForTool", () => {
       ANTHROPIC_PDF_MODEL,
     );
     expect(hoisted.hasAuthForProviderMock.mock.calls.length).toBe(firstCallCount);
+  });
+
+  it("reuses the cached result when authStore is unchanged even if auth file mtime changes", async () => {
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-pdf-model-authstore-"));
+    fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify({ profiles: {} }));
+    const authStore = {
+      version: 1,
+      profiles: {
+        "openai:default": { type: "api_key", provider: "openai", key: "test" },
+      },
+    } as const;
+    const cfg = withDefaultModel("openai/gpt-5.4");
+
+    expect(
+      resolvePdfModelConfigForTool({
+        cfg,
+        agentDir,
+        authStore: authStore as never,
+      })?.primary,
+    ).toBe("openai/gpt-5.4-mini");
+    const firstCallCount = hoisted.hasAuthForProviderMock.mock.calls.length;
+
+    fs.writeFileSync(
+      path.join(agentDir, "auth-profiles.json"),
+      JSON.stringify({ profiles: { touched: true } }),
+    );
+
+    expect(
+      resolvePdfModelConfigForTool({
+        cfg,
+        agentDir,
+        authStore: authStore as never,
+      })?.primary,
+    ).toBe("openai/gpt-5.4-mini");
+    expect(hoisted.hasAuthForProviderMock.mock.calls.length).toBe(firstCallCount);
+
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("does not scan configured providers when generic candidates already exist", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test");
+    vi.stubEnv("OPENAI_API_KEY", "openai-test");
+    const cfg = {
+      agents: { defaults: { model: { primary: "zai/glm-5" } } },
+      models: {
+        providers: {
+          openai: { models: [{ id: "gpt-5.4", input: ["image"] }] },
+          "unused-provider": { models: [{ id: "unused-vision", input: ["image"] }] },
+        },
+      },
+    } as OpenClawConfig;
+
+    expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR })?.primary).toBe(
+      ANTHROPIC_PDF_MODEL,
+    );
+
+    const providersChecked = new Set(
+      hoisted.hasAuthForProviderMock.mock.calls.map(([params]) => String(params.provider)),
+    );
+    expect(providersChecked.has("unused-provider")).toBe(false);
   });
 });

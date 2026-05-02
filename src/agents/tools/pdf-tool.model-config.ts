@@ -56,19 +56,60 @@ function safeStatFingerprint(filePath: string): string {
   }
 }
 
-function buildPdfToolModelConfigCacheKey(params: {
+function summarizeAuthStoreProviders(
+  authStore: AuthProfileStore | undefined,
+  params: { cfg?: OpenClawConfig; workspaceDir?: string },
+): string | null {
+  if (!authStore) {
+    return null;
+  }
+  const providers = new Set<string>();
+  for (const profile of Object.values(authStore.profiles ?? {})) {
+    const canonical = resolveProviderIdForAuth(profile.provider, {
+      config: params.cfg,
+      workspaceDir: params.workspaceDir,
+    });
+    if (canonical) {
+      providers.add(canonical);
+    }
+  }
+  return `store:${[...providers].toSorted((left, right) => left.localeCompare(right)).join(",")}`;
+}
+
+function buildPdfToolModelConfigCacheIdentity(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
   workspaceDir?: string;
-}): string {
+  authStore?: AuthProfileStore;
+}): {
+  cacheKey: string;
+  configKey: string;
+  workspaceIdentity: string;
+  authFingerprint: string;
+} {
   const configKey = params.cfg ? resolveRuntimeConfigCacheKey(params.cfg) : "config:none";
-  const requestedAuthPath = resolveAuthStorePath(params.agentDir);
-  const mainAuthPath = resolveAuthStorePath();
-  const authFingerprintParts = [safeStatFingerprint(requestedAuthPath)];
-  if (requestedAuthPath !== mainAuthPath) {
-    authFingerprintParts.push(safeStatFingerprint(mainAuthPath));
-  }
-  return [configKey, `workspace:${params.workspaceDir ?? ""}`, ...authFingerprintParts].join("|");
+  const workspaceIdentity = params.workspaceDir ?? "";
+  const authFingerprint =
+    summarizeAuthStoreProviders(params.authStore, {
+      cfg: params.cfg,
+      workspaceDir: params.workspaceDir,
+    }) ??
+    (() => {
+      const requestedAuthPath = resolveAuthStorePath(params.agentDir);
+      const mainAuthPath = resolveAuthStorePath();
+      const authFingerprintParts = [safeStatFingerprint(requestedAuthPath)];
+      if (requestedAuthPath !== mainAuthPath) {
+        authFingerprintParts.push(safeStatFingerprint(mainAuthPath));
+      }
+      return authFingerprintParts.join("|");
+    })();
+  const cacheKey = [configKey, `workspace:${workspaceIdentity}`, authFingerprint].join("|");
+  return {
+    cacheKey,
+    configKey,
+    workspaceIdentity,
+    authFingerprint,
+  };
 }
 
 export function clearPdfToolModelConfigCacheForTest(): void {
@@ -130,23 +171,30 @@ export function resolvePdfModelConfigForTool(params: {
   authStore?: AuthProfileStore;
 }): ImageModelConfig | null {
   const startedAt = Date.now();
-  const cacheKey = buildPdfToolModelConfigCacheKey({
+  const cacheIdentity = buildPdfToolModelConfigCacheIdentity({
     cfg: params.cfg,
     agentDir: params.agentDir,
     workspaceDir: params.workspaceDir,
+    authStore: params.authStore,
   });
   const now = Date.now();
-  const cached = pdfToolModelConfigCache.get(cacheKey);
+  const cached = pdfToolModelConfigCache.get(cacheIdentity.cacheKey);
   if (cached && cached.expiresAt > now) {
+    log.warn(
+      `[trace:pdf-tool] model-config-cache hit config=${cacheIdentity.configKey} workspace=${cacheIdentity.workspaceIdentity || "-"} auth=${cacheIdentity.authFingerprint}`,
+    );
     return cached.value ? { ...cached.value } : null;
   }
+  log.warn(
+    `[trace:pdf-tool] model-config-cache miss config=${cacheIdentity.configKey} workspace=${cacheIdentity.workspaceIdentity || "-"} auth=${cacheIdentity.authFingerprint}`,
+  );
   const explicitPdf = coercePdfModelConfig(params.cfg);
   if (explicitPdf.primary?.trim() || (explicitPdf.fallbacks?.length ?? 0) > 0) {
     const resolved = resolveConfiguredImageModelRefs({
       cfg: params.cfg,
       imageModelConfig: explicitPdf,
     });
-    pdfToolModelConfigCache.set(cacheKey, {
+    pdfToolModelConfigCache.set(cacheIdentity.cacheKey, {
       value: resolved ? { ...resolved } : null,
       expiresAt: now + PDF_MODEL_CONFIG_CACHE_TTL_MS,
     });
@@ -162,7 +210,7 @@ export function resolvePdfModelConfigForTool(params: {
       cfg: params.cfg,
       imageModelConfig: explicitImage,
     });
-    pdfToolModelConfigCache.set(cacheKey, {
+    pdfToolModelConfigCache.set(cacheIdentity.cacheKey, {
       value: resolved ? { ...resolved } : null,
       expiresAt: now + PDF_MODEL_CONFIG_CACHE_TTL_MS,
     });
@@ -280,7 +328,11 @@ export function resolvePdfModelConfigForTool(params: {
   });
   mark("generic-candidates", genericCandidatesStartedAt);
 
-  if (params.cfg?.models?.providers && typeof params.cfg.models.providers === "object") {
+  if (
+    genericImageCandidates.length === 0 &&
+    params.cfg?.models?.providers &&
+    typeof params.cfg.models.providers === "object"
+  ) {
     const configuredProvidersStartedAt = Date.now();
     const configuredScanTimings: Array<{ label: string; durationMs: number }> = [];
     for (const [providerKey, providerCfg] of Object.entries(params.cfg.models.providers)) {
@@ -321,6 +373,9 @@ export function resolvePdfModelConfigForTool(params: {
       if (!genericImageCandidates.includes(ref)) {
         genericImageCandidates.push(ref);
       }
+      // Registration only needs one viable configured provider candidate. Defer
+      // broader fallback expansion until the tool is actually executed.
+      break;
     }
     mark("configured-provider-scan", configuredProvidersStartedAt);
     providerTimings.push(...configuredScanTimings);
@@ -347,7 +402,7 @@ export function resolvePdfModelConfigForTool(params: {
     mark("build-fallbacks", fallbackBuildStartedAt);
     const result = { primary: preferred, ...(pruned.length > 0 ? { fallbacks: pruned } : {}) };
     const totalMs = Date.now() - startedAt;
-    pdfToolModelConfigCache.set(cacheKey, {
+    pdfToolModelConfigCache.set(cacheIdentity.cacheKey, {
       value: { ...result },
       expiresAt: now + PDF_MODEL_CONFIG_CACHE_TTL_MS,
     });
@@ -360,7 +415,7 @@ export function resolvePdfModelConfigForTool(params: {
   }
 
   const totalMs = Date.now() - startedAt;
-  pdfToolModelConfigCache.set(cacheKey, {
+  pdfToolModelConfigCache.set(cacheIdentity.cacheKey, {
     value: null,
     expiresAt: now + PDF_MODEL_CONFIG_CACHE_TTL_MS,
   });

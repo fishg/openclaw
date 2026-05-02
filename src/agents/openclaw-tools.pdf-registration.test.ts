@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { collectPresentOpenClawTools } from "./openclaw-tools.registration.js";
 import { createPdfTool } from "./tools/pdf-tool.js";
 
@@ -17,5 +17,47 @@ describe("createOpenClawTools PDF registration", () => {
 
     expect(pdfTool?.name).toBe("pdf");
     expect(collectPresentOpenClawTools([pdfTool]).map((tool) => tool.name)).toContain("pdf");
+  });
+
+  it("passes the logical spawn workspace to the PDF tool", async () => {
+    const createPdfToolMock = vi.fn(() => ({
+      name: "pdf",
+      description: "",
+      parameters: {},
+      execute: async () => ({ content: [] }),
+    }));
+
+    vi.doMock("./tools/pdf-tool.js", async () => {
+      const actual =
+        await vi.importActual<typeof import("./tools/pdf-tool.js")>("./tools/pdf-tool.js");
+      return {
+        ...actual,
+        createPdfTool: createPdfToolMock,
+      };
+    });
+
+    const { createOpenClawTools: createOpenClawToolsWithMock } =
+      await import("./openclaw-tools.js");
+    createOpenClawToolsWithMock({
+      agentDir: "/tmp/openclaw-agent-main",
+      workspaceDir: "/tmp/sandbox-copy",
+      spawnWorkspaceDir: "/tmp/real-workspace",
+      authProfileStore: { version: 1, profiles: {} },
+      config: {
+        agents: {
+          defaults: {
+            pdfModel: { primary: "openai/gpt-5.4-mini" },
+          },
+        },
+      },
+    });
+
+    expect(createPdfToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceDir: "/tmp/real-workspace",
+      }),
+    );
+
+    vi.doUnmock("./tools/pdf-tool.js");
   });
 });

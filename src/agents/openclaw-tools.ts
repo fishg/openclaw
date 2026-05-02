@@ -411,7 +411,7 @@ export function createOpenClawTools(
           config: options?.config,
           agentDir: options.agentDir,
           authProfileStore: options?.authProfileStore,
-          workspaceDir,
+          workspaceDir: spawnWorkspaceDir,
           sandbox,
           fsPolicy: options?.fsPolicy,
         })
