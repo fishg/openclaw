@@ -9,6 +9,7 @@ Docs: https://docs.openclaw.ai
 - Tools: add a platform-level tool descriptor planner for descriptor-first visibility, generic availability checks, and executor references. Thanks @shakkernerd.
 - Docs/Codex: clarify that ChatGPT/Codex subscription setups should use `openai/gpt-*` with `agentRuntime.id: "codex"` for native Codex runtime, while `openai-codex/*` remains the PI OAuth route. Thanks @pashpashpash.
 - Plugins/source checkout: load bundled plugins from the `extensions/*` pnpm workspace tree in source checkouts, so plugin-local dependencies and edits are used directly while packaged installs keep using the built runtime tree. Thanks @vincentkoc.
+- Plugins/beta: prepare Google Chat, LINE, Matrix, and Mattermost for `2026.5.1-beta.2` npm and ClawHub publishing, and keep publishable plugin dist trees out of the core npm package. Thanks @vincentkoc.
 - Plugins/beta: prepare BlueBubbles, diagnostics Prometheus, Google Meet, Nextcloud Talk, Nostr, Zalo, and Zalo Personal for `2026.5.1-beta.2` npm and ClawHub publishing. Thanks @vincentkoc.
 - Plugins/beta: prepare diagnostics OpenTelemetry, Discord, Diffs, Lobster, Memory LanceDB, Microsoft Teams, QQ Bot, Voice Call, and WhatsApp for `2026.5.1-beta.1` npm and ClawHub publishing. Thanks @vincentkoc.
 - Plugins/beta: prepare Brave, Codex, Feishu, Synology Chat, Tlon, and Twitch for `2026.5.1-beta.1` npm and ClawHub publishing. Thanks @vincentkoc.
@@ -25,11 +26,14 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Infer/media: report missing image-understanding and audio-transcription provider configuration for `image describe`, `image describe-many`, and `audio transcribe` instead of blaming the input path when no provider is available. Fixes #73569 and supersedes #73593, #74288, and #74495. Thanks @bittoby, @tmimmanuel, @Linux2010, and @vyctorbrzezowski.
+- Docs/health: clarify that session listing surfaces stored conversation rows rather than Discord/channel socket liveness, and point connectivity checks at channel status and health probes. Fixes #70420. Thanks @ashersoutherncities-art and @martingarramon.
 - Active Memory: use the configured recall timeout as the blocking prompt-build hook budget by default and move cold-start setup grace behind explicit `setupGraceTimeoutMs` config, so the plugin no longer silently extends 15000 ms configs to 45000 ms on the main lane. Fixes #75843. Thanks @vishutdhar.
 - Plugins/web-provider: reuse the active gateway plugin registry for runtime web provider resolution after deriving the same candidate plugin ids as the loader path, avoiding a redundant `loadOpenClawPlugins` call on every request while preserving origin and scope filters. Fixes #75513. Thanks @jochen.
 - Crestodian/CLI: exit non-zero when interactive Crestodian is invoked without a TTY, so scripts and CI no longer treat the setup error as success. Fixes #73646 and supersedes #73928 and #74059. Thanks @bittoby, @luyao618, and @Linux2010.
 - Cron: keep implicit/default isolated cron announce deliveries out of the main session awareness queue, so isolated jobs do not accumulate in the main conversation. Fixes #61426. Thanks @Lihannon.
 - Subagents: avoid duplicate parent-visible replies when a parent uses `sessions_send` on its own persistent native subagent session, while preserving announce delivery for async sends. Fixes #73550. Thanks @sylviazhang2006-design.
+- Web search/Brave: add opt-in `brave.http` diagnostics for Brave request URLs/query params, response status/timing, and cache hit/miss/write events without logging API keys or response bodies. Fixes #55196. Thanks @mecampbellsoup.
 - Agents/sandbox: preserve existing workspace file modes when sandbox edits atomically replace files, so 0644 files do not collapse to 0600 after Write/Edit/apply_patch. Fixes #44077. Thanks @patosullivan.
 - Agents/models: keep legacy CLI runtime model refs such as `claude-cli/*` in the configured allowlist after canonical runtime migration, so cron `payload.model` overrides keep working. Fixes #75753. Thanks @RyanSandoval.
 - Codex/app-server: restart the shared Codex app-server client once when it closes during startup thread resume, preserving the existing thread binding instead of retrying `thread/start` on a closed client. Thanks @vincentkoc.
