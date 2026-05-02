@@ -59,7 +59,7 @@ describe("openai responses payload policy", () => {
     });
   });
 
-  it("strips store and prompt cache for proxy-like responses routes when requested", () => {
+  it("keeps prompt cache for proxy-like responses routes unless compat explicitly disables it", () => {
     const policy = resolveOpenAIResponsesPayloadPolicy(
       {
         api: "openai-responses",
@@ -81,6 +81,30 @@ describe("openai responses payload policy", () => {
     applyOpenAIResponsesPayloadPolicy(payload, policy);
 
     expect(payload).not.toHaveProperty("store");
+    expect(payload.prompt_cache_key).toBe("session-123");
+    expect(payload.prompt_cache_retention).toBe("24h");
+  });
+
+  it("strips prompt cache when compat explicitly disables prompt cache key support", () => {
+    const policy = resolveOpenAIResponsesPayloadPolicy(
+      {
+        api: "openai-responses",
+        provider: "custom-proxy",
+        baseUrl: "https://proxy.example.com/v1",
+        compat: { supportsPromptCacheKey: false },
+      },
+      {
+        enablePromptCacheStripping: true,
+        storeMode: "provider-policy",
+      },
+    );
+    const payload = {
+      prompt_cache_key: "session-123",
+      prompt_cache_retention: "24h",
+    } satisfies Record<string, unknown>;
+
+    applyOpenAIResponsesPayloadPolicy(payload, policy);
+
     expect(payload).not.toHaveProperty("prompt_cache_key");
     expect(payload).not.toHaveProperty("prompt_cache_retention");
   });

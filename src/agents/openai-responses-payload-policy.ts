@@ -231,14 +231,13 @@ function resolveOpenAIResponsesPayloadCapabilities(
     endpointClass === "azure-openai";
   const usesKnownNativeOpenAIRoute =
     endpointClass === "default" ? provider === "openai" : usesKnownNativeOpenAIEndpoint;
-  const usesExplicitProxyLikeEndpoint = usesConfiguredBaseUrl && !usesKnownNativeOpenAIEndpoint;
   const promptCacheKeySupport = readCompatPayloadBoolean(model.compat, "supportsPromptCacheKey");
   const shouldStripResponsesPromptCache =
     promptCacheKeySupport === true
       ? false
       : promptCacheKeySupport === false
         ? isResponsesApi
-        : isResponsesApi && usesExplicitProxyLikeEndpoint;
+        : false;
   const supportsResponsesStoreField =
     readCompatPayloadBoolean(model.compat, "supportsStore") !== false && isResponsesApi;
 

@@ -3831,7 +3831,7 @@ describe("applyExtraParamsToAgent", () => {
     },
   );
 
-  it("strips prompt cache fields for non-OpenAI openai-responses endpoints", () => {
+  it("keeps prompt cache fields for custom openai-responses endpoints", () => {
     const payload = runResponsesPayloadMutationCase({
       applyProvider: "custom-proxy",
       applyModelId: "some-model",
@@ -3847,8 +3847,8 @@ describe("applyExtraParamsToAgent", () => {
         prompt_cache_retention: "24h",
       },
     });
-    expect(payload).not.toHaveProperty("prompt_cache_key");
-    expect(payload).not.toHaveProperty("prompt_cache_retention");
+    expect(payload.prompt_cache_key).toBe("session-xyz");
+    expect(payload.prompt_cache_retention).toBe("24h");
   });
 
   it("keeps prompt cache fields for direct OpenAI openai-responses endpoints", () => {
