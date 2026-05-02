@@ -62,24 +62,6 @@ function sanitizeTimeoutLogUrl(rawUrl: string | undefined): string | undefined {
   }
 }
 
-function formatTimeoutLogMessage(params: {
-  timeoutMs: number;
-  elapsedMs: number;
-  operation?: string;
-  url?: string;
-}): string {
-  const parts = [
-    "fetch timeout reached; aborting operation",
-    `timeoutMs=${params.timeoutMs}`,
-    `elapsedMs=${params.elapsedMs}`,
-    `operation=${params.operation?.trim() || "unknown"}`,
-  ];
-  if (params.url) {
-    parts.push(`url=${params.url}`);
-  }
-  return parts.join(" ");
-}
-
 function abortDueToTimeout(
   controller: AbortController,
   timeoutMs: number,
@@ -92,9 +74,18 @@ function abortDueToTimeout(
   }
   const sanitizedUrl = sanitizeTimeoutLogUrl(url);
   const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-  log.warn(formatTimeoutLogMessage({ timeoutMs, elapsedMs, operation, url: sanitizedUrl }), {
+  const consoleMessage = [
+    `fetch timeout after ${timeoutMs}ms`,
+    `(elapsed ${elapsedMs}ms)`,
+    operation ? `operation=${operation}` : null,
+    sanitizedUrl ? `url=${sanitizedUrl}` : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
+  log.warn("fetch timeout reached; aborting operation", {
     timeoutMs,
     elapsedMs,
+    consoleMessage,
     ...(operation ? { operation } : {}),
     ...(sanitizedUrl ? { url: sanitizedUrl } : {}),
   });

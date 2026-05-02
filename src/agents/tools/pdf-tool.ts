@@ -12,6 +12,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { resolveUserPath } from "../../utils.js";
+import type { AuthProfileStore } from "../auth-profiles/types.js";
 import { type ImageModelConfig } from "./image-tool.helpers.js";
 import {
   applyImageModelConfigDefaults,
@@ -244,6 +245,7 @@ async function runPdfPrompt(params: {
 export function createPdfTool(options?: {
   config?: OpenClawConfig;
   agentDir?: string;
+  authProfileStore?: AuthProfileStore;
   workspaceDir?: string;
   sandbox?: PdfSandboxConfig;
   fsPolicy?: ToolFsPolicy;
@@ -254,6 +256,16 @@ export function createPdfTool(options?: {
     if (explicit.primary?.trim() || (explicit.fallbacks?.length ?? 0) > 0) {
       throw new Error("createPdfTool requires agentDir when enabled");
     }
+    return null;
+  }
+
+  const pdfModelConfig = resolvePdfModelConfigForTool({
+    cfg: options?.config,
+    agentDir,
+    workspaceDir: options?.workspaceDir,
+    authStore: options?.authProfileStore,
+  });
+  if (!pdfModelConfig) {
     return null;
   }
 
@@ -282,10 +294,6 @@ export function createPdfTool(options?: {
     parameters: PdfToolSchema,
     execute: async (_toolCallId, args) => {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-      const pdfModelConfig = resolvePdfModelConfigForTool({ cfg: options?.config, agentDir });
-      if (!pdfModelConfig) {
-        throw new Error("No PDF model configured.");
-      }
 
       // MARK: - Normalize pdf + pdfs input
       const pdfInputs = resolvePdfInputs(record);

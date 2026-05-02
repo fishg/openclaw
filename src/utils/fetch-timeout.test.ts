@@ -32,11 +32,14 @@ describe("buildTimeoutAbortSignal", () => {
     expect(signal?.aborted).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=unit-test url=https://example.com/v1/responses",
+      "fetch timeout reached; aborting operation",
       expect.objectContaining({
         timeoutMs: 25,
+        elapsedMs: 25,
         operation: "unit-test",
         url: "https://example.com/v1/responses",
+        consoleMessage:
+          "fetch timeout after 25ms (elapsed 25ms) operation=unit-test url=https://example.com/v1/responses",
       }),
     );
 
@@ -53,9 +56,14 @@ describe("buildTimeoutAbortSignal", () => {
     await vi.advanceTimersByTimeAsync(25);
 
     expect(warn).toHaveBeenCalledWith(
-      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=unit-test url=/api/responses",
+      "fetch timeout reached; aborting operation",
       expect.objectContaining({
+        timeoutMs: 25,
+        elapsedMs: 25,
+        operation: "unit-test",
         url: "/api/responses",
+        consoleMessage:
+          "fetch timeout after 25ms (elapsed 25ms) operation=unit-test url=/api/responses",
       }),
     );
 
@@ -72,9 +80,14 @@ describe("buildTimeoutAbortSignal", () => {
     await vi.advanceTimersByTimeAsync(25);
 
     expect(warn).toHaveBeenCalledWith(
-      "fetch timeout reached; aborting operation timeoutMs=25 elapsedMs=25 operation=telegram.getMe url=https://api.telegram.org/bot-redacted/getMe",
+      "fetch timeout reached; aborting operation",
       expect.objectContaining({
+        timeoutMs: 25,
+        elapsedMs: 25,
+        operation: "telegram.getMe",
         url: "https://api.telegram.org/bot-redacted/getMe",
+        consoleMessage:
+          "fetch timeout after 25ms (elapsed 25ms) operation=telegram.getMe url=https://api.telegram.org/bot-redacted/getMe",
       }),
     );
 
