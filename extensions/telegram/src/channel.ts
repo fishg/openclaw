@@ -64,6 +64,7 @@ import { parseTelegramReplyToMessageId, parseTelegramThreadId } from "./outbound
 import type { TelegramProbe } from "./probe.js";
 import * as probeModule from "./probe.js";
 import { resolveTelegramReactionLevel } from "./reaction-level.js";
+import { resolveTelegramStartupProbeTimeoutMs } from "./request-timeouts.js";
 import { getTelegramRuntime } from "./runtime.js";
 import { telegramSecurityAdapter } from "./security.js";
 import { resolveTelegramSessionConversation } from "./session-conversation.js";
@@ -929,6 +930,37 @@ export const telegramPlugin = createChatChannelPlugin({
           throw new Error(reason);
         }
         const token = (account.token ?? "").trim();
+        let telegramBotLabel = "";
+        let unauthorizedTokenReason: string | null = null;
+        try {
+          const probe = await resolveTelegramProbe()(
+            token,
+            resolveTelegramStartupProbeTimeoutMs(account.config.timeoutSeconds),
+            {
+              accountId: account.accountId,
+              proxyUrl: account.config.proxy,
+              network: account.config.network,
+              apiRoot: account.config.apiRoot,
+              includeWebhookInfo: false,
+            },
+          );
+          const username = probe.ok ? probe.bot?.username?.trim() : null;
+          if (username) {
+            telegramBotLabel = ` (@${username})`;
+          }
+          if (!probe.ok && probe.status === 401) {
+            unauthorizedTokenReason = formatTelegramUnauthorizedTokenError(account);
+          }
+        } catch (err) {
+          if (getTelegramRuntime().logging.shouldLogVerbose()) {
+            ctx.log?.debug?.(`[${account.accountId}] bot probe failed: ${String(err)}`);
+          }
+        }
+        if (unauthorizedTokenReason) {
+          ctx.log?.error?.(`[${account.accountId}] ${unauthorizedTokenReason}`);
+          throw new Error(unauthorizedTokenReason);
+        }
+        ctx.log?.info(`[${account.accountId}] starting provider${telegramBotLabel}`);
         const setStatus = createAccountStatusSink({
           accountId: account.accountId,
           setStatus: ctx.setStatus,
@@ -939,7 +971,6 @@ export const telegramPlugin = createChatChannelPlugin({
           setStatus,
           log: ctx.log,
         });
-        ctx.log?.info(`[${account.accountId}] starting provider`);
         return resolveTelegramMonitor()({
           token,
           accountId: account.accountId,

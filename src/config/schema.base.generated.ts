@@ -4213,6 +4213,22 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     reliability: {
                       type: "object",
                       properties: {
+                        outputLimits: {
+                          type: "object",
+                          properties: {
+                            maxTurnRawChars: {
+                              type: "integer",
+                              minimum: 1024,
+                              maximum: 67108864,
+                            },
+                            maxTurnLines: {
+                              type: "integer",
+                              minimum: 100,
+                              maximum: 100000,
+                            },
+                          },
+                          additionalProperties: false,
+                        },
                         watchdog: {
                           type: "object",
                           properties: {
@@ -29255,6 +29271,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["advanced", "url-secret"],
     },
   },
-  version: "2026.4.30",
+  version: "2026.5.2",
   generatedAt: "2026-03-22T21:17:33.302Z",
 };

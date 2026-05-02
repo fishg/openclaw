@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import type { OpenClawConfig } from "../config/types.js";
-import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
-import { loadPluginManifestRegistryForPluginRegistry } from "../plugins/plugin-registry.js";
+import { loadManifestMetadataSnapshot } from "../plugins/manifest-contract-eligibility.js";
 import { resolvePluginSourceRoots } from "../plugins/roots.js";
 import { normalizeMediaProviderId } from "./provider-id.js";
 import type { MediaUnderstandingProvider } from "./types.js";
@@ -26,23 +25,19 @@ export function buildMediaUnderstandingManifestMetadataRegistry(
   workspaceDir?: string,
 ): Map<string, MediaUnderstandingProvider> {
   const registry = new Map<string, MediaUnderstandingProvider>();
-  const snapshot =
-    getCurrentPluginMetadataSnapshot({
-      config: cfg,
-      ...(workspaceDir ? { workspaceDir } : {}),
-    }) ??
-    (workspacePluginRootHasEntries(workspaceDir)
-      ? undefined
-      : getCurrentPluginMetadataSnapshot({ config: cfg }));
-  const plugins =
-    snapshot?.plugins ??
-    loadPluginManifestRegistryForPluginRegistry({
-      config: cfg,
-      env: process.env,
-      includeDisabled: true,
-      ...(workspaceDir ? { workspaceDir } : {}),
-    }).plugins;
-  for (const plugin of plugins) {
+  const snapshot = loadManifestMetadataSnapshot(
+    workspacePluginRootHasEntries(workspaceDir)
+      ? {
+          config: cfg,
+          env: process.env,
+          ...(workspaceDir ? { workspaceDir } : {}),
+        }
+      : {
+          config: cfg,
+          env: process.env,
+        },
+  );
+  for (const plugin of snapshot.plugins) {
     const declaredProviders = new Set(
       (plugin.contracts?.mediaUnderstandingProviders ?? []).map((providerId) =>
         normalizeMediaProviderId(providerId),

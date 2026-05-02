@@ -33,7 +33,9 @@ const mocks = vi.hoisted(() => ({
   ),
   resolveInstalledManifestRegistryIndexFingerprint: vi.fn(() => "test-installed-index"),
   loadBundledCapabilityRuntimeRegistry: vi.fn(),
-  loadPluginRegistrySnapshot: vi.fn<() => { plugins: Array<Record<string, unknown>> }>(() => ({
+  loadPluginRegistrySnapshot: vi.fn<
+    (_params?: unknown) => { plugins: Array<Record<string, unknown>> }
+  >(() => ({
     plugins: [],
   })),
   withBundledPluginAllowlistCompat: vi.fn(
@@ -65,16 +67,41 @@ vi.mock("./manifest-registry-installed.js", () => ({
     mocks.resolveInstalledManifestRegistryIndexFingerprint,
 }));
 
+vi.mock("./manifest-registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./manifest-registry.js")>();
+  return {
+    ...actual,
+    loadPluginManifestRegistry: mocks.loadPluginManifestRegistry,
+  };
+});
+
 vi.mock("./plugin-registry.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./plugin-registry.js")>();
   return {
     ...actual,
     loadPluginRegistrySnapshot: mocks.loadPluginRegistrySnapshot,
-    loadPluginRegistrySnapshotWithMetadata: (params?: { index?: unknown }) => ({
-      snapshot: params?.index ?? mocks.loadPluginRegistrySnapshot(),
-      source: params?.index ? "provided" : "derived",
-      diagnostics: [],
-    }),
+    loadPluginRegistrySnapshotWithMetadata: (params?: { index?: unknown }) => {
+      const snapshot = (params?.index ?? mocks.loadPluginRegistrySnapshot(params)) as {
+        plugins?: Array<Record<string, unknown>>;
+      };
+      return {
+        snapshot: {
+          ...snapshot,
+          plugins:
+            snapshot.plugins && snapshot.plugins.length > 0
+              ? snapshot.plugins
+              : [
+                  {
+                    pluginId: "__test_manifest_registry_fixture__",
+                    origin: "bundled",
+                    enabled: true,
+                  },
+                ],
+        },
+        source: params?.index ? "provided" : "derived",
+        diagnostics: [],
+      };
+    },
     loadPluginManifestRegistryForPluginRegistry: (
       ...args: Parameters<typeof mocks.loadPluginManifestRegistry>
     ) => {
@@ -121,8 +148,6 @@ function expectBundledCompatLoadPath(params: {
     expect.objectContaining({
       config: params.cfg,
       env: process.env,
-      includeDisabled: true,
-      index: expect.any(Object),
     }),
   );
   expect(mocks.withBundledPluginEnablementCompat).toHaveBeenCalledWith({
@@ -1085,8 +1110,6 @@ describe("resolvePluginCapabilityProviders", () => {
       expect.objectContaining({
         config: {},
         env: process.env,
-        includeDisabled: true,
-        index: expect.any(Object),
       }),
     );
     expect(mocks.resolveRuntimePluginRegistry).toHaveBeenCalledWith({
@@ -1213,8 +1236,6 @@ describe("resolvePluginCapabilityProviders", () => {
       expect.objectContaining({
         config: cfg,
         env: process.env,
-        includeDisabled: true,
-        index: expect.any(Object),
       }),
     );
     expect(mocks.withBundledPluginAllowlistCompat).toHaveBeenCalledWith({
@@ -1248,8 +1269,6 @@ describe("resolvePluginCapabilityProviders", () => {
       expect.objectContaining({
         config: {},
         env: process.env,
-        includeDisabled: true,
-        index: expect.any(Object),
       }),
     );
     expect(mocks.resolveRuntimePluginRegistry).toHaveBeenCalledWith();
