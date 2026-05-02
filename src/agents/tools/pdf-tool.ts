@@ -1,6 +1,7 @@
 import { type Context, complete } from "@mariozechner/pi-ai";
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
@@ -53,6 +54,8 @@ const DEFAULT_MAX_PAGES = 20;
 
 const PDF_MIN_TEXT_CHARS = 200;
 const PDF_MAX_PIXELS = 4_000_000;
+const log = createSubsystemLogger("agents/tools/pdf");
+const PDF_TOOL_FACTORY_TRACE_WARN_MS = 500;
 
 export const PdfToolSchema = Type.Object({
   prompt: Type.Optional(Type.String()),
@@ -133,18 +136,29 @@ async function runPdfPrompt(params: {
 }> {
   const effectiveCfg = applyImageModelConfigDefaults(params.cfg, params.pdfModelConfig);
 
+  const prepStartedAt = Date.now();
   await ensureOpenClawModelsJson(effectiveCfg, params.agentDir);
+  const ensuredModelsJsonMs = Date.now() - prepStartedAt;
+  const authStorageStartedAt = Date.now();
   const authStorage = discoverAuthStorage(params.agentDir);
+  const authStorageMs = Date.now() - authStorageStartedAt;
+  const discoverModelsStartedAt = Date.now();
   const modelRegistry = discoverModels(authStorage, params.agentDir);
+  const discoverModelsMs = Date.now() - discoverModelsStartedAt;
 
   let extractionCache: PdfExtractedContent[] | null = null;
   const getExtractions = async (): Promise<PdfExtractedContent[]> => {
     if (!extractionCache) {
+      const extractionStartedAt = Date.now();
       extractionCache = await params.getExtractions();
+      log.warn(
+        `[trace:pdf-tool] execute extractions totalMs=${Date.now() - extractionStartedAt} pdfCount=${params.pdfBuffers.length} pageFilter=${params.pageNumbers?.length ?? 0}`,
+      );
     }
     return extractionCache;
   };
 
+  const fallbackStartedAt = Date.now();
   const result = await runWithImageModelFallback({
     cfg: effectiveCfg,
     modelOverride: params.modelOverride,
@@ -225,6 +239,10 @@ async function runPdfPrompt(params: {
     },
   });
 
+  log.warn(
+    `[trace:pdf-tool] execute totalMs=${Date.now() - fallbackStartedAt} modelsJsonMs=${ensuredModelsJsonMs} authStorageMs=${authStorageMs} discoverModelsMs=${discoverModelsMs} attempts=${result.attempts.length} finalProvider=${result.result.provider} finalModel=${result.result.model} native=${String(result.result.native)}`,
+  );
+
   return {
     text: result.result.text,
     provider: result.result.provider,
@@ -259,16 +277,24 @@ export function createPdfTool(options?: {
     return null;
   }
 
+  const startedAt = Date.now();
   const pdfModelConfig = resolvePdfModelConfigForTool({
     cfg: options?.config,
     agentDir,
     workspaceDir: options?.workspaceDir,
     authStore: options?.authProfileStore,
   });
+  const modelConfigMs = Date.now() - startedAt;
   if (!pdfModelConfig) {
+    if (modelConfigMs >= PDF_TOOL_FACTORY_TRACE_WARN_MS) {
+      log.warn(
+        `[trace:pdf-tool] factory totalMs=${modelConfigMs} modelConfigMs=${modelConfigMs} result=null workspaceDir=${options?.workspaceDir ? "set" : "unset"} authStore=${options?.authProfileStore ? "provided" : "missing"}`,
+      );
+    }
     return null;
   }
 
+  const defaultsStartedAt = Date.now();
   const maxBytesMbDefault = (
     options?.config?.agents?.defaults as Record<string, unknown> | undefined
   )?.pdfMaxBytesMb;
@@ -282,10 +308,19 @@ export function createPdfTool(options?: {
     typeof maxPagesDefault === "number" && Number.isFinite(maxPagesDefault)
       ? Math.floor(maxPagesDefault)
       : DEFAULT_MAX_PAGES;
+  const defaultsMs = Date.now() - defaultsStartedAt;
 
   const description =
     "Analyze one or more PDF documents with a model. Supports native PDF analysis for Anthropic and Google models, with text/image extraction fallback for other providers. Use pdf for a single path/URL, or pdfs for multiple (up to 10). Provide a prompt describing what to analyze.";
+  const policyStartedAt = Date.now();
   const remoteMediaSsrfPolicy = resolveRemoteMediaSsrfPolicy(options?.config);
+  const policyMs = Date.now() - policyStartedAt;
+  const totalMs = Date.now() - startedAt;
+  if (totalMs >= PDF_TOOL_FACTORY_TRACE_WARN_MS) {
+    log.warn(
+      `[trace:pdf-tool] factory totalMs=${totalMs} modelConfigMs=${modelConfigMs} defaultsMs=${defaultsMs} policyMs=${policyMs} primary=${pdfModelConfig.primary ?? "null"} fallbackCount=${pdfModelConfig.fallbacks?.length ?? 0} workspaceDir=${options?.workspaceDir ? "set" : "unset"} authStore=${options?.authProfileStore ? "provided" : "missing"}`,
+    );
+  }
 
   return {
     label: "PDF",

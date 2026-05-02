@@ -1,10 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
-import { resolvePdfModelConfigForTool } from "./pdf-tool.model-config.js";
+import {
+  clearPdfToolModelConfigCacheForTest,
+  resolvePdfModelConfigForTool,
+} from "./pdf-tool.model-config.js";
 import { resetPdfToolAuthEnv } from "./pdf-tool.test-support.js";
 
 const ANTHROPIC_PDF_MODEL = "anthropic/claude-opus-4-7";
 const TEST_AGENT_DIR = "/tmp/openclaw-pdf-model-config";
+const hoisted = vi.hoisted(() => ({
+  hasAuthForProviderMock: vi.fn(({ provider }: { provider: string }) => {
+    if (provider === "anthropic") {
+      return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_OAUTH_TOKEN);
+    }
+    if (provider === "openai") {
+      return Boolean(process.env.OPENAI_API_KEY);
+    }
+    if (provider === "google") {
+      return Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
+    }
+    return false;
+  }),
+}));
 
 vi.mock("./model-config.helpers.js", () => ({
   coerceToolModelConfig: (model?: unknown) => {
@@ -18,18 +35,7 @@ vi.mock("./model-config.helpers.js", () => ({
       ...(objectModel?.fallbacks?.length ? { fallbacks: objectModel.fallbacks } : {}),
     };
   },
-  hasAuthForProvider: ({ provider }: { provider: string }) => {
-    if (provider === "anthropic") {
-      return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_OAUTH_TOKEN);
-    }
-    if (provider === "openai") {
-      return Boolean(process.env.OPENAI_API_KEY);
-    }
-    if (provider === "google") {
-      return Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
-    }
-    return false;
-  },
+  hasAuthForProvider: hoisted.hasAuthForProviderMock,
   resolveDefaultModelRef: (cfg?: OpenClawConfig) => {
     const modelCfg = cfg?.agents?.defaults?.model;
     const primary =
@@ -50,10 +56,13 @@ function withDefaultModel(primary: string): OpenClawConfig {
 describe("resolvePdfModelConfigForTool", () => {
   beforeEach(() => {
     resetPdfToolAuthEnv();
+    hoisted.hasAuthForProviderMock.mockClear();
+    clearPdfToolModelConfigCacheForTest();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    clearPdfToolModelConfigCacheForTest();
   });
 
   it("returns null without any auth", async () => {
@@ -104,5 +113,22 @@ describe("resolvePdfModelConfigForTool", () => {
     expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR })?.primary).toBe(
       ANTHROPIC_PDF_MODEL,
     );
+  });
+
+  it("reuses the cached model config result for identical inputs", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test");
+    vi.stubEnv("OPENAI_API_KEY", "openai-test");
+    const cfg = withDefaultModel("openai/gpt-5.4");
+
+    expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR })?.primary).toBe(
+      ANTHROPIC_PDF_MODEL,
+    );
+    const firstCallCount = hoisted.hasAuthForProviderMock.mock.calls.length;
+    expect(firstCallCount).toBeGreaterThan(0);
+
+    expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR })?.primary).toBe(
+      ANTHROPIC_PDF_MODEL,
+    );
+    expect(hoisted.hasAuthForProviderMock.mock.calls.length).toBe(firstCallCount);
   });
 });

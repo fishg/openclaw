@@ -42,6 +42,7 @@ const log = createSubsystemLogger("plugins/tools");
 const PLUGIN_TOOL_FACTORY_WARN_TOTAL_MS = 5_000;
 const PLUGIN_TOOL_FACTORY_WARN_FACTORY_MS = 1_000;
 const PLUGIN_TOOL_FACTORY_SUMMARY_LIMIT = 20;
+const PLUGIN_TOOL_PHASE_WARN_TOTAL_MS = 1_000;
 
 const pluginToolMeta = new WeakMap<AnyAgentTool, PluginToolMeta>();
 
@@ -364,6 +365,8 @@ export function resolvePluginTools(params: {
   const runtimeOptions = params.allowGatewaySubagentBinding
     ? { allowGatewaySubagentBinding: true as const }
     : undefined;
+  const overallStartedAt = Date.now();
+  const pluginIdPhaseStartedAt = Date.now();
   const onlyPluginIds = resolvePluginToolRuntimePluginIds({
     config: context.config,
     availabilityConfig: params.context.runtimeConfig ?? context.config,
@@ -372,6 +375,8 @@ export function resolvePluginTools(params: {
     toolAllowlist: params.toolAllowlist,
     hasAuthForProvider: params.hasAuthForProvider,
   });
+  const pluginIdPhaseMs = toElapsedMs(Date.now() - pluginIdPhaseStartedAt);
+  const registryPhaseStartedAt = Date.now();
   const loadOptions = buildPluginRuntimeLoadOptions(context, {
     activate: false,
     toolDiscovery: true,
@@ -382,6 +387,7 @@ export function resolvePluginTools(params: {
     loadOptions,
     onlyPluginIds,
   });
+  const registryPhaseMs = toElapsedMs(Date.now() - registryPhaseStartedAt);
   if (!registry) {
     return [];
   }
@@ -539,6 +545,36 @@ export function resolvePluginTools(params: {
     } else if (log.isEnabled("trace")) {
       log.trace(formatPluginToolFactoryTimingSummary(timingSummary));
     }
+  }
+
+  const totalMs = toElapsedMs(Date.now() - overallStartedAt);
+  const factoriesMs = toElapsedMs(Date.now() - factoryTimingStartedAt);
+  if (totalMs >= PLUGIN_TOOL_PHASE_WARN_TOTAL_MS) {
+    log.warn(
+      [
+        "[trace:plugin-tools] phases",
+        `totalMs=${totalMs}`,
+        `resolvePluginIdsMs=${pluginIdPhaseMs}`,
+        `resolveRegistryMs=${registryPhaseMs}`,
+        `factoryLoopMs=${factoriesMs}`,
+        `onlyPluginIds=${onlyPluginIds.length}`,
+        `registryTools=${registry.tools.length}`,
+        `resolvedTools=${tools.length}`,
+      ].join(" "),
+    );
+  } else if (log.isEnabled("trace")) {
+    log.trace(
+      [
+        "[trace:plugin-tools] phases",
+        `totalMs=${totalMs}`,
+        `resolvePluginIdsMs=${pluginIdPhaseMs}`,
+        `resolveRegistryMs=${registryPhaseMs}`,
+        `factoryLoopMs=${factoriesMs}`,
+        `onlyPluginIds=${onlyPluginIds.length}`,
+        `registryTools=${registry.tools.length}`,
+        `resolvedTools=${tools.length}`,
+      ].join(" "),
+    );
   }
 
   return tools;

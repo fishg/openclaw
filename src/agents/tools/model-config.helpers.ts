@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
@@ -11,12 +12,45 @@ import {
   hasAnyAuthProfileStoreSource,
   listProfilesForProvider,
 } from "../auth-profiles.js";
+import { resolveAuthStorePath } from "../auth-profiles/path-resolve.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { resolveEnvApiKey } from "../model-auth.js";
 import { resolveConfiguredModelRef } from "../model-selection.js";
 
 export type ToolModelConfig = { primary?: string; fallbacks?: string[]; timeoutMs?: number };
+const TOOL_PROVIDER_AUTH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+type ToolProviderAuthCacheEntry = {
+  fingerprint: string;
+  value: boolean;
+  expiresAt: number;
+};
+
+const toolProviderAuthCache = new Map<string, ToolProviderAuthCacheEntry>();
+
+function safeStatFingerprint(filePath: string): string {
+  try {
+    const stat = fs.statSync(filePath);
+    return `${filePath}:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return `${filePath}:missing`;
+  }
+}
+
+function buildToolProviderAuthFingerprint(agentDir: string): string {
+  const requestedAuthPath = resolveAuthStorePath(agentDir);
+  const mainAuthPath = resolveAuthStorePath();
+  const parts = [safeStatFingerprint(requestedAuthPath)];
+  if (requestedAuthPath !== mainAuthPath) {
+    parts.push(safeStatFingerprint(mainAuthPath));
+  }
+  return parts.join("|");
+}
+
+export function clearToolProviderAuthCacheForTest(): void {
+  toolProviderAuthCache.clear();
+}
 
 export function hasToolModelConfig(model: ToolModelConfig | undefined): boolean {
   return Boolean(
@@ -44,20 +78,38 @@ export function hasAuthForProvider(params: {
   if (resolveEnvApiKey(params.provider)?.apiKey) {
     return true;
   }
+  const agentDir = params.agentDir?.trim();
+  if (agentDir) {
+    const cacheKey = `${agentDir}\u0000${params.provider.trim()}`;
+    const fingerprint = buildToolProviderAuthFingerprint(agentDir);
+    const cached = toolProviderAuthCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now && cached.fingerprint === fingerprint) {
+      return cached.value;
+    }
+    const value = (() => {
+      if (params.authStore) {
+        return listProfilesForProvider(params.authStore, params.provider).length > 0;
+      }
+      if (!hasAnyAuthProfileStoreSource(agentDir)) {
+        return false;
+      }
+      const store = ensureAuthProfileStore(agentDir, {
+        externalCli: externalCliDiscoveryForProviderAuth({ provider: params.provider }),
+      });
+      return listProfilesForProvider(store, params.provider).length > 0;
+    })();
+    toolProviderAuthCache.set(cacheKey, {
+      fingerprint,
+      value,
+      expiresAt: now + TOOL_PROVIDER_AUTH_CACHE_TTL_MS,
+    });
+    return value;
+  }
   if (params.authStore) {
     return listProfilesForProvider(params.authStore, params.provider).length > 0;
   }
-  const agentDir = params.agentDir?.trim();
-  if (!agentDir) {
-    return false;
-  }
-  if (!hasAnyAuthProfileStoreSource(agentDir)) {
-    return false;
-  }
-  const store = ensureAuthProfileStore(agentDir, {
-    externalCli: externalCliDiscoveryForProviderAuth({ provider: params.provider }),
-  });
-  return listProfilesForProvider(store, params.provider).length > 0;
+  return false;
 }
 
 export function coerceToolModelConfig(model?: AgentModelConfig): ToolModelConfig {

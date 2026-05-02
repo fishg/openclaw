@@ -752,14 +752,22 @@ describe("resolvePluginTools optional tools", () => {
     const tools = resolveOptionalDemoTools(["optional_tool"]);
 
     expectResolvedToolNames(tools, ["optional_tool"]);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    const message = String(warnSpy.mock.calls[0]?.[0] ?? "");
-    expect(message).toContain("[trace:plugin-tools] factory timings");
-    expect(message).toContain("totalMs=1200");
-    expect(message).toContain("optional-demo:1200ms@1200ms");
-    expect(message).toContain("names=[optional_tool]");
-    expect(message).toContain("result=single");
-    expect(message).toContain("count=1");
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    const messages = warnSpy.mock.calls.map((call) => String(call[0] ?? ""));
+    const factoryMessage = messages.find((message) =>
+      message.includes("[trace:plugin-tools] factory timings"),
+    );
+    const phaseMessage = messages.find((message) =>
+      message.includes("[trace:plugin-tools] phases"),
+    );
+    expect(factoryMessage).toContain("totalMs=1200");
+    expect(factoryMessage).toContain("optional-demo:1200ms@1200ms");
+    expect(factoryMessage).toContain("names=[optional_tool]");
+    expect(factoryMessage).toContain("result=single");
+    expect(factoryMessage).toContain("count=1");
+    expect(phaseMessage).toContain("resolvePluginIdsMs=0");
+    expect(phaseMessage).toContain("resolveRegistryMs=0");
+    expect(phaseMessage).toContain("factoryLoopMs=1200");
   });
 
   it("emits trace factory timings below the warn threshold when trace logging is enabled", () => {
@@ -782,11 +790,17 @@ describe("resolvePluginTools optional tools", () => {
     const tools = resolveOptionalDemoTools(["optional_tool"]);
 
     expectResolvedToolNames(tools, ["optional_tool"]);
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const message = String(logSpy.mock.calls[0]?.[0] ?? "");
-    expect(message).toContain("[trace:plugin-tools] factory timings");
-    expect(message).toContain("totalMs=5");
-    expect(message).toContain("optional-demo:5ms@5ms");
+    expect(logSpy).toHaveBeenCalledTimes(2);
+    const messages = logSpy.mock.calls.map((call) => String(call[0] ?? ""));
+    const factoryMessage = messages.find((message) =>
+      message.includes("[trace:plugin-tools] factory timings"),
+    );
+    const phaseMessage = messages.find((message) =>
+      message.includes("[trace:plugin-tools] phases"),
+    );
+    expect(factoryMessage).toContain("totalMs=5");
+    expect(factoryMessage).toContain("optional-demo:5ms@5ms");
+    expect(phaseMessage).toContain("factoryLoopMs=5");
   });
 
   it("does not log plugin factory timings for fast factories without trace logging", () => {
