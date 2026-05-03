@@ -64,6 +64,19 @@ const resolveAgentDir = vi.hoisted(() => vi.fn(() => "/tmp/agent"));
 const resolveDefaultModelForAgent = vi.hoisted(() =>
   vi.fn(() => ({ provider: "openai", model: "gpt-test" })),
 );
+const resolveTelegramAccount = vi.hoisted(() =>
+  vi.fn(({ cfg, accountId }: { cfg: Record<string, unknown>; accountId?: string }) => ({
+    accountId: accountId ?? "default",
+    enabled: true,
+    token: "token",
+    tokenSource: "config",
+    config:
+      ((cfg.channels as { telegram?: { accounts?: Record<string, unknown> } } | undefined)?.telegram
+        ?.accounts?.[accountId ?? "default"] as Record<string, unknown> | undefined) ??
+      (cfg.channels as { telegram?: Record<string, unknown> } | undefined)?.telegram ??
+      {},
+  })),
+);
 const getAgentScopedMediaLocalRoots = vi.hoisted(() =>
   vi.fn((_cfg: unknown, agentId: string) => [`/tmp/.openclaw/workspace-${agentId}`]),
 );
@@ -115,6 +128,7 @@ vi.mock("./bot-message-dispatch.agent.runtime.js", () => ({
   findModelInCatalog,
   loadModelCatalog,
   modelSupportsVision,
+  resolveTelegramAccount,
   resolveAgentDir,
   resolveDefaultModelForAgent,
 }));
@@ -375,16 +389,33 @@ describe("dispatchTelegramMessage draft streaming", () => {
     replyToMode?: Parameters<typeof dispatchTelegramMessage>[0]["replyToMode"];
   }) {
     const bot = params.bot ?? createBot();
+    const runtimeCfg =
+      params.cfg ??
+      ({
+        channels: {
+          telegram: {
+            accounts: {
+              default: params.telegramCfg ?? {},
+            },
+          },
+        },
+      } as OpenClawConfig);
+    const telegramDeps =
+      params.telegramDeps ??
+      ({
+        ...telegramDepsForTest,
+        getRuntimeConfig: (() => runtimeCfg) as TelegramBotDeps["getRuntimeConfig"],
+      } satisfies TelegramBotDeps);
     await dispatchTelegramMessage({
       context: params.context,
       bot,
-      cfg: params.cfg ?? {},
+      cfg: runtimeCfg,
       runtime: createRuntime(),
       replyToMode: params.replyToMode ?? "first",
       streamMode: params.streamMode ?? "partial",
       textLimit: 4096,
       telegramCfg: params.telegramCfg ?? {},
-      telegramDeps: params.telegramDeps ?? telegramDepsForTest,
+      telegramDeps,
       opts: { token: "token" },
     });
   }
@@ -475,6 +506,60 @@ describe("dispatchTelegramMessage draft streaming", () => {
         replies: [expect.objectContaining({ replyToId: "9001" })],
         replyQuoteMessageId: 9001,
         replyQuoteText: " quoted slice\n",
+      }),
+    );
+  });
+
+  it("refreshes runtime config before dispatching a reply turn", async () => {
+    const staleCfg = {
+      channels: {
+        telegram: {
+          accounts: {
+            default: {
+              linkPreview: true,
+              replyToMode: "first",
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    const freshCfg = {
+      channels: {
+        telegram: {
+          accounts: {
+            default: {
+              linkPreview: false,
+              replyToMode: "off",
+            },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    dispatchReplyWithBufferedBlockDispatcher.mockResolvedValue({ queuedFinal: true });
+    deliverReplies.mockResolvedValue({ delivered: true });
+    const telegramDeps = {
+      ...telegramDepsForTest,
+      getRuntimeConfig: (() => freshCfg) as TelegramBotDeps["getRuntimeConfig"],
+    } satisfies TelegramBotDeps;
+
+    await dispatchWithContext({
+      context: createContext(),
+      cfg: staleCfg,
+      telegramCfg: {
+        linkPreview: true,
+        replyToMode: "first",
+      },
+      telegramDeps,
+    });
+
+    expect(createChannelReplyPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: freshCfg,
+      }),
+    );
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: freshCfg,
       }),
     );
   });

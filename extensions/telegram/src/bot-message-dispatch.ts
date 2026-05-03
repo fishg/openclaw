@@ -266,6 +266,9 @@ export const dispatchTelegramMessage = async ({
     removeAckAfterReply,
     statusReactionController,
   } = context;
+  // Refresh config-derived Telegram runtime behavior per dispatch so hot-reloaded
+  // model/provider changes take effect without restarting the long-lived bot.
+  cfg = telegramDeps.getRuntimeConfig();
   const statusReactionTiming = {
     ...DEFAULT_TIMING,
     ...cfg.messages?.statusReactions?.timing,
