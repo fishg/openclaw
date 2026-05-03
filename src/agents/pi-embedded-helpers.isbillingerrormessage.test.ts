@@ -274,6 +274,8 @@ describe("isCloudCodeAssistFormatError", () => {
         "messages.1.content.1.tool_use.id",
         "tool_use.id should match pattern",
         "invalid request format",
+        "Unexpected end of JSON input",
+        "Unexpected token < in JSON at position 0",
       ],
       true,
     );
@@ -1102,6 +1104,8 @@ describe("classifyFailoverReason", () => {
     ).toBe("rate_limit");
     expect(classifyFailoverReason("all credentials for model x are cooling down")).toBeNull();
     expect(classifyFailoverReason("invalid request format")).toBe("format");
+    expect(classifyFailoverReason("Unexpected end of JSON input")).toBe("format");
+    expect(classifyFailoverReason("Unexpected token < in JSON at position 0")).toBe("format");
     expect(classifyFailoverReason("credit balance too low")).toBe("billing");
     // Billing with "limit exhausted" must stay billing, not rate_limit (avoids key-disable regression)
     expect(

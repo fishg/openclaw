@@ -582,30 +582,26 @@ describe("runWithModelFallback", () => {
     });
     const run = vi.fn().mockResolvedValueOnce({ payloads: [] });
 
-    await expect(
-      runWithModelFallback({
-        cfg,
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        run,
-        classifyResult: ({ result }) => {
-          const payloads = (result as { payloads?: unknown[] }).payloads;
-          return Array.isArray(payloads) && payloads.length === 0
-            ? {
-                message: "terminal result contained no visible assistant reply",
-                reason: "format",
-                code: "empty_result",
-              }
-            : null;
-        },
-      }),
-    ).rejects.toMatchObject({
-      name: "FailoverError",
-      reason: "format",
+    const err = await runWithModelFallback({
+      cfg,
       provider: "openai-codex",
       model: "gpt-5.4",
-      code: "empty_result",
-    });
+      run,
+      classifyResult: ({ result }) => {
+        const payloads = (result as { payloads?: unknown[] }).payloads;
+        return Array.isArray(payloads) && payloads.length === 0
+          ? {
+              message: "terminal result contained no visible assistant reply",
+              reason: "format",
+              code: "empty_result",
+            }
+          : null;
+      },
+    }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ name: "FallbackSummaryError" });
+    expect(String((err as Error).message)).toContain(
+      "All models failed (1): openai-codex/gpt-5.4: terminal result contained no visible assistant reply (format)",
+    );
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -766,6 +762,23 @@ describe("runWithModelFallback", () => {
       }),
     ).rejects.toThrow("something weird");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a fallback summary even when a single auth candidate fails", async () => {
+    const cfg = makeCfg();
+    const run = vi
+      .fn()
+      .mockImplementation(() => Promise.reject(Object.assign(new Error("nope"), { status: 401 })));
+
+    await expect(
+      runWithModelFallback({
+        cfg,
+        provider: "google",
+        model: "gemini-3.1-pro-preview",
+        run,
+        fallbacksOverride: [],
+      }),
+    ).rejects.toThrow("All models failed (1): google/gemini-3.1-pro-preview: nope (auth)");
   });
 
   it("treats LiveSessionModelSwitchError as failover on last candidate (#58496 family)", async () => {
@@ -1545,6 +1558,37 @@ describe("runWithModelFallback", () => {
     expect(run.mock.calls).toEqual([
       ["anthropic", "claude-sonnet-4"],
       ["openai", "gpt-4o"],
+    ]);
+  });
+
+  it("keeps configured fallback chain when runtime provider differs from configured primary", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-5.4",
+            fallbacks: ["openai-codex/gpt-5.2", "zai/glm-5-turbo"],
+          },
+        },
+      },
+    });
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("no google auth"), { status: 401 }))
+      .mockResolvedValueOnce("ok");
+
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "google",
+      model: "gemini-3.1-pro-preview",
+      run,
+    });
+
+    expect(result.provider).toBe("openai");
+    expect(result.model).toBe("gpt-5.4");
+    expect(run.mock.calls).toEqual([
+      ["google", "gemini-3.1-pro-preview"],
+      ["openai", "gpt-5.4"],
     ]);
   });
 

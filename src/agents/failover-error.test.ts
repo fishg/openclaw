@@ -730,6 +730,11 @@ describe("failover-error", () => {
         message: "invalid request format: messages.1.content.1.tool_use.id",
       }),
     ).toBe("format");
+    expect(
+      resolveFailoverReasonFromError({
+        message: "Unexpected end of JSON input",
+      }),
+    ).toBe("format");
   });
 
   it("infers timeout from common node error codes", () => {

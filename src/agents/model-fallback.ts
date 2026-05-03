@@ -382,7 +382,10 @@ function throwFallbackFailureSummary(params: {
   attribution?: FailoverAttribution;
 }): never {
   if (params.attempts.length <= 1 && params.lastError) {
-    throw params.lastError;
+    const described = describeFailoverError(params.lastError);
+    if (!described.reason || described.reason === "unknown") {
+      throw params.lastError;
+    }
   }
   const summary =
     params.attempts.length > 0 ? params.attempts.map(params.formatAttempt).join(" | ") : "unknown";
@@ -562,10 +565,8 @@ function resolveFallbackCandidates(params: {
     const configuredFallbacks = resolveAgentModelFallbackValues(
       params.cfg?.agents?.defaults?.model,
     );
-    // When user runs a different provider than config, only use configured fallbacks
-    // if the current model is already in that chain (e.g. session on first fallback).
     if (effectivePrimary.provider !== configuredPrimary.provider) {
-      const isConfiguredFallback = configuredFallbacks.some((raw) => {
+      const currentFallbackIndex = configuredFallbacks.findIndex((raw) => {
         const resolved = resolveModelRefFromString({
           raw,
           defaultProvider,
@@ -573,9 +574,11 @@ function resolveFallbackCandidates(params: {
         });
         return resolved ? sameModelCandidate(resolved.ref, effectivePrimary) : false;
       });
-      return isConfiguredFallback ? configuredFallbacks : [];
+      if (currentFallbackIndex >= 0) {
+        return configuredFallbacks.slice(currentFallbackIndex);
+      }
+      return [`${configuredPrimary.provider}/${configuredPrimary.model}`, ...configuredFallbacks];
     }
-    // Same provider: always use full fallback chain (model version differences within provider).
     return configuredFallbacks;
   })();
 
