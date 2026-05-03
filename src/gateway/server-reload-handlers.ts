@@ -15,6 +15,7 @@ import {
   resolveGatewayRestartDeferralTimeoutMs,
   setGatewaySigusr1RestartPolicy,
 } from "../infra/restart.js";
+import { resetManifestModelIdNormalizationPoliciesCache } from "../plugins/manifest-model-id-normalization.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
 import {
   activateSecretsRuntimeSnapshot,
@@ -301,6 +302,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS);
     if (plan.reloadPlugins) {
+      resetManifestModelIdNormalizationPoliciesCache();
       const stopChannelsBeforePluginReplace = async (channels: ReadonlySet<ChannelKind>) => {
         for (const channel of channels) {
           channelsToRestart.add(channel);

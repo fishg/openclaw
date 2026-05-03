@@ -35,6 +35,24 @@ export type ModelAliasIndex = {
   byKey: Map<string, string[]>;
 };
 
+type ParsedConfiguredAllowlistEntry = {
+  raw: string;
+  ref: ModelRef | null;
+  key: string | null;
+  requiresCatalogInference: boolean;
+};
+
+type ConfiguredModelArtifacts = {
+  aliasIndex: ModelAliasIndex;
+  configuredAllowlistKeys: Set<string> | null;
+  parsedAllowlistEntries: ParsedConfiguredAllowlistEntry[];
+};
+
+const configuredModelArtifactsCache = new WeakMap<
+  OpenClawConfig,
+  Map<string, ConfiguredModelArtifacts>
+>();
+
 function sanitizeModelWarningValue(value: string): string {
   const stripped = value ? stripAnsi(value) : "";
   let controlBoundary = -1;
@@ -66,6 +84,96 @@ function mergeModelCatalogEntries(params: {
     seen.add(key);
   }
   return merged;
+}
+
+function catalogLookupKey(provider: string, modelId: string): string {
+  return `${normalizeProviderId(provider)}::${normalizeLowercaseStringOrEmpty(modelId)}`;
+}
+
+function configuredArtifactsCacheKey(params: {
+  defaultProvider: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+}): string {
+  return [
+    normalizeProviderId(params.defaultProvider),
+    params.allowManifestNormalization === false ? "manifest:off" : "manifest:on",
+    params.allowPluginNormalization === false ? "plugin:off" : "plugin:on",
+  ].join("|");
+}
+
+function cloneModelAliasIndex(index: ModelAliasIndex): ModelAliasIndex {
+  return {
+    byAlias: new Map(index.byAlias),
+    byKey: new Map([...index.byKey.entries()].map(([key, aliases]) => [key, [...aliases]])),
+  };
+}
+
+function resolveConfiguredModelArtifacts(params: {
+  cfg: OpenClawConfig;
+  defaultProvider: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+}): ConfiguredModelArtifacts {
+  const cacheKey = configuredArtifactsCacheKey(params);
+  const cachedByKey = configuredModelArtifactsCache.get(params.cfg);
+  const cached = cachedByKey?.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
+  const byKey = new Map<string, string[]>();
+  const rawModels = params.cfg.agents?.defaults?.models ?? {};
+  const configuredAllowlistKeys = Object.keys(rawModels).length > 0 ? new Set<string>() : null;
+  const parsedAllowlistEntries: ParsedConfiguredAllowlistEntry[] = [];
+
+  for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
+    const raw = keyRaw.trim();
+    const requiresCatalogInference = !raw.includes("/");
+    const parsed = parseModelRefWithCompatAlias({
+      cfg: params.cfg,
+      raw: keyRaw,
+      defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
+    });
+    const key = parsed ? modelKey(parsed.provider, parsed.model) : null;
+    if (key) {
+      configuredAllowlistKeys?.add(key);
+    }
+    parsedAllowlistEntries.push({
+      raw: keyRaw,
+      ref: parsed,
+      key,
+      requiresCatalogInference,
+    });
+    if (!parsed) {
+      continue;
+    }
+    const alias =
+      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
+    if (!alias) {
+      continue;
+    }
+    const aliasKey = normalizeLowercaseStringOrEmpty(alias);
+    byAlias.set(aliasKey, { alias, ref: parsed });
+    const existing = byKey.get(key ?? "") ?? [];
+    existing.push(alias);
+    byKey.set(key ?? "", existing);
+  }
+
+  const next: ConfiguredModelArtifacts = {
+    aliasIndex: { byAlias, byKey },
+    configuredAllowlistKeys,
+    parsedAllowlistEntries,
+  };
+  const nextByKey = cachedByKey ?? new Map<string, ConfiguredModelArtifacts>();
+  nextByKey.set(cacheKey, next);
+  if (!cachedByKey) {
+    configuredModelArtifactsCache.set(params.cfg, nextByKey);
+  }
+  return next;
 }
 
 export function inferUniqueProviderFromConfiguredModels(params: {
@@ -316,24 +424,19 @@ export function resolveAllowlistModelKey(params: {
 export function buildConfiguredAllowlistKeys(params: {
   cfg: OpenClawConfig | undefined;
   defaultProvider: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
 }): Set<string> | null {
-  const rawAllowlist = Object.keys(params.cfg?.agents?.defaults?.models ?? {});
-  if (rawAllowlist.length === 0) {
+  if (!params.cfg) {
     return null;
   }
-
-  const keys = new Set<string>();
-  for (const raw of rawAllowlist) {
-    const key = resolveAllowlistModelKey({
-      cfg: params.cfg,
-      raw,
-      defaultProvider: params.defaultProvider,
-    });
-    if (key) {
-      keys.add(key);
-    }
-  }
-  return keys.size > 0 ? keys : null;
+  const artifacts = resolveConfiguredModelArtifacts({
+    cfg: params.cfg,
+    defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+  });
+  return artifacts.configuredAllowlistKeys ? new Set(artifacts.configuredAllowlistKeys) : null;
 }
 
 export function buildModelAliasIndex(params: {
@@ -342,35 +445,14 @@ export function buildModelAliasIndex(params: {
   allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
 }): ModelAliasIndex {
-  const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
-  const byKey = new Map<string, string[]>();
-
-  const rawModels = params.cfg.agents?.defaults?.models ?? {};
-  for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
-    const parsed = parseModelRefWithCompatAlias({
+  return cloneModelAliasIndex(
+    resolveConfiguredModelArtifacts({
       cfg: params.cfg,
-      raw: keyRaw,
       defaultProvider: params.defaultProvider,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-    });
-    if (!parsed) {
-      continue;
-    }
-    const alias =
-      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
-    if (!alias) {
-      continue;
-    }
-    const aliasKey = normalizeLowercaseStringOrEmpty(alias);
-    byAlias.set(aliasKey, { alias, ref: parsed });
-    const key = modelKey(parsed.provider, parsed.model);
-    const existing = byKey.get(key) ?? [];
-    existing.push(alias);
-    byKey.set(key, existing);
-  }
-
-  return { byAlias, byKey };
+    }).aliasIndex,
+  );
 }
 
 type ModelCatalogMetadata = {
@@ -382,27 +464,21 @@ function buildModelCatalogMetadata(params: {
   cfg: OpenClawConfig;
   defaultProvider: string;
 }): ModelCatalogMetadata {
+  const artifacts = resolveConfiguredModelArtifacts({
+    cfg: params.cfg,
+    defaultProvider: params.defaultProvider,
+  });
   const configuredByKey = new Map<string, ModelCatalogEntry>();
   for (const entry of buildConfiguredModelCatalog({ cfg: params.cfg })) {
     configuredByKey.set(modelKey(entry.provider, entry.id), entry);
   }
 
   const aliasByKey = new Map<string, string>();
-  const configuredModels = params.cfg.agents?.defaults?.models ?? {};
-  for (const [rawKey, entryRaw] of Object.entries(configuredModels)) {
-    const key = resolveAllowlistModelKey({
-      cfg: params.cfg,
-      raw: rawKey,
-      defaultProvider: params.defaultProvider,
-    });
-    if (!key) {
-      continue;
+  for (const [key, aliases] of artifacts.aliasIndex.byKey) {
+    const alias = aliases[0];
+    if (alias) {
+      aliasByKey.set(key, alias);
     }
-    const alias = ((entryRaw as { alias?: string } | undefined)?.alias ?? "").trim();
-    if (!alias) {
-      continue;
-    }
-    aliasByKey.set(key, alias);
   }
 
   return { configuredByKey, aliasByKey };
@@ -587,6 +663,13 @@ export function buildAllowedModelSetWithFallbacks(params: {
     primary: params.catalog,
     secondary: configuredCatalog,
   }).map((entry) => applyModelCatalogMetadata({ entry, metadata }));
+  const catalogByLookupKey = new Map<string, ModelCatalogEntry>();
+  for (const entry of catalog) {
+    const lookupKey = catalogLookupKey(entry.provider, entry.id);
+    if (!catalogByLookupKey.has(lookupKey)) {
+      catalogByLookupKey.set(lookupKey, entry);
+    }
+  }
   const rawAllowlist = (() => {
     const modelMap = params.cfg.agents?.defaults?.models ?? {};
     return Object.keys(modelMap);
@@ -603,6 +686,10 @@ export function buildAllowedModelSetWithFallbacks(params: {
       : null;
   const defaultKey = defaultRef ? modelKey(defaultRef.provider, defaultRef.model) : undefined;
   const catalogKeys = new Set(catalog.map((entry) => modelKey(entry.provider, entry.id)));
+  const configuredArtifacts = resolveConfiguredModelArtifacts({
+    cfg: params.cfg,
+    defaultProvider: params.defaultProvider,
+  });
 
   if (allowAny) {
     if (defaultKey) {
@@ -616,18 +703,8 @@ export function buildAllowedModelSetWithFallbacks(params: {
   }
 
   const allowedKeys = new Set<string>();
-  const allowedRefs: ModelRef[] = [];
+  const allowedCatalogLookupKeys = new Set<string>();
   const syntheticCatalogEntries = new Map<string, ModelCatalogEntry>();
-  const addAllowedCatalogRef = (ref: ModelRef) => {
-    if (
-      !allowedRefs.some(
-        (existing) =>
-          modelKey(existing.provider, existing.model) === modelKey(ref.provider, ref.model),
-      )
-    ) {
-      allowedRefs.push(ref);
-    }
-  };
   const addAllowedModelRef = (raw: string) => {
     const trimmed = raw.trim();
     const defaultProvider = !trimmed.includes("/")
@@ -647,19 +724,29 @@ export function buildAllowedModelSetWithFallbacks(params: {
       return;
     }
     const key = modelKey(parsed.provider, parsed.model);
+    const lookupKey = catalogLookupKey(parsed.provider, parsed.model);
     allowedKeys.add(key);
-    addAllowedCatalogRef(parsed);
+    allowedCatalogLookupKeys.add(lookupKey);
 
-    if (
-      !findModelCatalogEntry(catalog, { provider: parsed.provider, modelId: parsed.model }) &&
-      !syntheticCatalogEntries.has(key)
-    ) {
+    if (!catalogByLookupKey.has(lookupKey) && !syntheticCatalogEntries.has(key)) {
       syntheticCatalogEntries.set(key, buildSyntheticAllowedCatalogEntry({ parsed, metadata }));
     }
   };
 
-  for (const raw of rawAllowlist) {
-    addAllowedModelRef(raw);
+  for (const entry of configuredArtifacts.parsedAllowlistEntries) {
+    if (!entry.requiresCatalogInference && entry.ref && entry.key) {
+      const lookupKey = catalogLookupKey(entry.ref.provider, entry.ref.model);
+      allowedKeys.add(entry.key);
+      allowedCatalogLookupKeys.add(lookupKey);
+      if (!catalogByLookupKey.has(lookupKey) && !syntheticCatalogEntries.has(entry.key)) {
+        syntheticCatalogEntries.set(
+          entry.key,
+          buildSyntheticAllowedCatalogEntry({ parsed: entry.ref, metadata }),
+        );
+      }
+      continue;
+    }
+    addAllowedModelRef(entry.raw);
   }
 
   for (const fallback of params.fallbackModels) {
@@ -669,16 +756,13 @@ export function buildAllowedModelSetWithFallbacks(params: {
   if (defaultKey) {
     allowedKeys.add(defaultKey);
     if (defaultRef) {
-      addAllowedCatalogRef(defaultRef);
+      allowedCatalogLookupKeys.add(catalogLookupKey(defaultRef.provider, defaultRef.model));
     }
   }
 
   const allowedCatalog = [
     ...catalog.filter((entry) =>
-      allowedRefs.some(
-        (ref) =>
-          findModelCatalogEntry([entry], { provider: ref.provider, modelId: ref.model }) === entry,
-      ),
+      allowedCatalogLookupKeys.has(catalogLookupKey(entry.provider, entry.id)),
     ),
     ...syntheticCatalogEntries.values(),
   ];
