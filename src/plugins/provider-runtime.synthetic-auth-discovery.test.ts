@@ -34,6 +34,9 @@ const resolvePluginDiscoveryProvidersRuntime = vi.hoisted(() =>
     },
   ]),
 );
+const resolveRuntimeSyntheticAuthProviderRefs = vi.hoisted(() =>
+  vi.fn(() => ["anthropic-vertex", "ollama"]),
+);
 
 vi.mock("./provider-hook-runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./provider-hook-runtime.js")>();
@@ -52,6 +55,10 @@ vi.mock("./provider-discovery.runtime.js", () => ({
   resolvePluginDiscoveryProvidersRuntime,
 }));
 
+vi.mock("./synthetic-auth.runtime.js", () => ({
+  resolveRuntimeSyntheticAuthProviderRefs,
+}));
+
 vi.mock("./providers.js", () => ({
   resolveCatalogHookProviderPluginIds: vi.fn(() => []),
   resolveExternalAuthProfileCompatFallbackPluginIds: vi.fn(() => []),
@@ -68,6 +75,21 @@ vi.mock("./providers.js", () => ({
 import { resolveProviderSyntheticAuthWithPlugin } from "./provider-runtime.js";
 
 describe("resolveProviderSyntheticAuthWithPlugin", () => {
+  it("skips runtime/discovery resolution for providers without synthetic-auth support", () => {
+    expect(
+      resolveProviderSyntheticAuthWithPlugin({
+        provider: "deepseek",
+        context: {
+          config: undefined,
+          provider: "deepseek",
+          providerConfig: undefined,
+        },
+      }),
+    ).toBeUndefined();
+    expect(resolvePluginDiscoveryProvidersRuntime).not.toHaveBeenCalled();
+    expect(resolveProviderRuntimePlugin).not.toHaveBeenCalled();
+  });
+
   it("falls back to lightweight discovery providers when runtime hooks are unavailable", () => {
     expect(
       resolveProviderSyntheticAuthWithPlugin({

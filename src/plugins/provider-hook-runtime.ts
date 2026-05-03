@@ -150,10 +150,9 @@ export function resolveProviderRuntimePlugin(
   if (activePlugin) {
     return activePlugin;
   }
-  const cacheConfig = params.env && params.env !== process.env ? undefined : params.config;
   const plugin = resolveConfigScopedRuntimeCacheValue({
     cache: providerRuntimePluginCache,
-    config: cacheConfig,
+    config: params.config,
     key: resolveProviderRuntimePluginCacheKey(params),
     load: () => {
       return (

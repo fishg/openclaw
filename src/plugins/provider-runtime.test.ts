@@ -45,6 +45,11 @@ const resolveOwningPluginIdsForProviderMock = vi.fn<ResolveOwningPluginIdsForPro
 const resolveBundledProviderPolicySurfaceMock = vi.fn<ResolveBundledProviderPolicySurface>(
   (_) => null,
 );
+const resolveRuntimeSyntheticAuthProviderRefsMock = vi.fn(() => [
+  "demo",
+  "anthropic-vertex",
+  "ollama",
+]);
 const providerRuntimeWarnMock = vi.fn();
 
 let augmentModelCatalogWithProviderPlugins: typeof import("./provider-runtime.js").augmentModelCatalogWithProviderPlugins;
@@ -263,6 +268,9 @@ describe("provider-runtime", () => {
       isPluginProvidersLoadInFlight: (params: unknown) =>
         isPluginProvidersLoadInFlightMock(params as never),
     }));
+    vi.doMock("./synthetic-auth.runtime.js", () => ({
+      resolveRuntimeSyntheticAuthProviderRefs: () => resolveRuntimeSyntheticAuthProviderRefsMock(),
+    }));
     vi.doMock("../logging/subsystem.js", () => ({
       createSubsystemLogger: () => ({
         debug: vi.fn(),
@@ -338,6 +346,12 @@ describe("provider-runtime", () => {
     resolveExternalAuthProfileProviderPluginIdsMock.mockReturnValue([]);
     resolveOwningPluginIdsForProviderMock.mockReset();
     resolveOwningPluginIdsForProviderMock.mockReturnValue(undefined);
+    resolveRuntimeSyntheticAuthProviderRefsMock.mockReset();
+    resolveRuntimeSyntheticAuthProviderRefsMock.mockReturnValue([
+      "demo",
+      "anthropic-vertex",
+      "ollama",
+    ]);
     resolveBundledProviderPolicySurfaceMock.mockReset();
     resolveBundledProviderPolicySurfaceMock.mockReturnValue(null);
     providerRuntimeWarnMock.mockReset();
@@ -551,6 +565,48 @@ describe("provider-runtime", () => {
     }
 
     expect(resolvePluginProvidersMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses runtime provider cache entries for repeated lookups with the same config and explicit env object", () => {
+    const provider: ProviderPlugin = {
+      id: DEMO_PROVIDER_ID,
+      label: "Demo",
+      auth: [],
+    };
+    const config = {
+      plugins: {
+        entries: {
+          demo: { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+    const env = { ...process.env } as NodeJS.ProcessEnv;
+
+    resolveOwningPluginIdsForProviderMock.mockReturnValue(["demo"]);
+    resolvePluginProvidersMock.mockReturnValue([provider]);
+
+    expect(
+      resolveProviderRuntimePlugin({
+        provider: DEMO_PROVIDER_ID,
+        config,
+        env,
+        applyAutoEnable: false,
+        bundledProviderAllowlistCompat: false,
+        bundledProviderVitestCompat: false,
+      }),
+    ).toBe(provider);
+    expect(
+      resolveProviderRuntimePlugin({
+        provider: DEMO_PROVIDER_ID,
+        config,
+        env,
+        applyAutoEnable: false,
+        bundledProviderAllowlistCompat: false,
+        bundledProviderVitestCompat: false,
+      }),
+    ).toBe(provider);
+
+    expect(resolvePluginProvidersMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not reuse auto-enabled runtime providers for synthetic auth fallback", () => {

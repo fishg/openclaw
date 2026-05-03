@@ -33,6 +33,7 @@ import {
   resolveOwningPluginIdsForProvider,
 } from "./providers.js";
 import { getActivePluginRegistryWorkspaceDirFromState } from "./runtime-state.js";
+import { resolveRuntimeSyntheticAuthProviderRefs } from "./synthetic-auth.runtime.js";
 import { resolveRuntimeTextTransforms } from "./text-transforms.runtime.js";
 import type {
   ProviderAuthDoctorHintContext,
@@ -829,6 +830,18 @@ export function resolveProviderSyntheticAuthWithPlugin(params: {
   context: ProviderResolveSyntheticAuthContext;
 }) {
   const providerRefs = resolveProviderHookRefs(params.provider, params.context.providerConfig);
+  const syntheticAuthProviderRefs = new Set(
+    resolveRuntimeSyntheticAuthProviderRefs().map((providerRef) =>
+      normalizeProviderId(providerRef),
+    ),
+  );
+  if (
+    !providerRefs.some((providerRef) =>
+      syntheticAuthProviderRefs.has(normalizeProviderId(providerRef)),
+    )
+  ) {
+    return undefined;
+  }
   const discoveryPluginIds = [
     ...new Set(
       providerRefs.flatMap(
