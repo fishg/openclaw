@@ -48,6 +48,8 @@ const {
   setTelegramBotRuntimeForTest,
 } = await import("./bot-core.js");
 const { resetTelegramForumFlagCacheForTest } = await import("./bot/helpers.js");
+const { primeTelegramProbeSuccessCacheForTests, resetTelegramProbeFetcherCacheForTests } =
+  await import("./probe.js");
 let createTelegramBot: (
   opts: TelegramBotOptions,
 ) => ReturnType<typeof import("./bot-core.js").createTelegramBotCore>;
@@ -162,6 +164,7 @@ describe("createTelegramBot", () => {
   });
   beforeEach(() => {
     resetTelegramForumFlagCacheForTest();
+    resetTelegramProbeFetcherCacheForTests();
     setTelegramBotRuntimeForTest(
       telegramBotRuntimeForTest as unknown as Parameters<typeof setTelegramBotRuntimeForTest>[0],
     );
@@ -212,6 +215,38 @@ describe("createTelegramBot", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("injects cached botInfo so grammY can skip redundant getMe init", () => {
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: { dmPolicy: "open", allowFrom: ["*"] },
+      },
+    });
+    primeTelegramProbeSuccessCacheForTests({
+      token: "tok",
+      options: { accountId: "default" },
+      botInfo: {
+        id: 123,
+        is_bot: true,
+        first_name: "Test",
+        username: "cached_bot",
+        can_join_groups: true,
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+
+    expect(botCtorSpy).toHaveBeenCalledWith(
+      "tok",
+      expect.objectContaining({
+        botInfo: expect.objectContaining({
+          id: 123,
+          username: "cached_bot",
+        }),
+      }),
+    );
+  });
+
   it("applies global and per-account timeoutSeconds", () => {
     loadConfig.mockReturnValue({
       channels: {

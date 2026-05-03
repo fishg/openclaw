@@ -61,6 +61,7 @@ export type TelegramNetworkConfig = {
 export type TelegramInlineButtonsScope = "off" | "dm" | "group" | "all" | "allowlist";
 export type TelegramStreamingMode = "off" | "partial" | "block" | "progress";
 export type TelegramExecApprovalTarget = "dm" | "channel" | "both";
+export type TelegramGetMeCacheMode = "success-24h" | "legacy";
 
 export type TelegramExecApprovalConfig = {
   /** Enable mode for Telegram exec approvals on this account. Default: auto when approvers can be resolved; false disables. */
@@ -152,6 +153,13 @@ export type TelegramAccountConfig = {
   mediaMaxMb?: number;
   /** Telegram API client timeout in seconds (grammY ApiClientOptions). */
   timeoutSeconds?: number;
+  /**
+   * Controls whether successful Telegram getMe probes are cached in-process.
+   * Default behavior is "success-24h", which reuses the last successful bot
+   * identity for 24 hours to avoid redundant getMe traffic. Set "legacy" to
+   * restore the previous uncached behavior.
+   */
+  getMeCacheMode?: TelegramGetMeCacheMode;
   /** Telegram polling watchdog threshold in milliseconds. Default: 120000. */
   pollingStallThresholdMs?: number;
   /** Retry policy for outbound Telegram API calls. */

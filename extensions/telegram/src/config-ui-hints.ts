@@ -101,6 +101,10 @@ export const telegramChannelConfigUiHints = {
     label: "Telegram API Timeout (seconds)",
     help: "Max seconds before Telegram API requests are aborted (default: 500 per grammY).",
   },
+  getMeCacheMode: {
+    label: "Telegram getMe Cache Mode",
+    help: 'Controls redundant Telegram getMe probes: "success-24h" (default) reuses the last successful bot identity for 24 hours, while "legacy" restores the previous uncached behavior.',
+  },
   pollingStallThresholdMs: {
     label: "Telegram Polling Stall Threshold (ms)",
     help: "Milliseconds without completed Telegram getUpdates liveness before the polling watchdog restarts the polling runner. Default: 120000.",

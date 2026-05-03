@@ -37,6 +37,7 @@ import type { TelegramBotOptions } from "./bot.types.js";
 import { buildTelegramGroupPeerId, resolveTelegramStreamMode } from "./bot/helpers.js";
 import { resolveTelegramTransport } from "./fetch.js";
 import { tagTelegramNetworkError } from "./network-errors.js";
+import { readCachedTelegramBotInfo } from "./probe.js";
 import { resolveTelegramRequestTimeoutMs } from "./request-timeouts.js";
 import { createTelegramSendChatActionHandler } from "./sendchataction-401-backoff.js";
 import { getTelegramSequentialKey } from "./sequential-key.js";
@@ -348,7 +349,21 @@ export function createTelegramBotCore(
         }
       : undefined;
 
-  const bot = new botRuntime.Bot(opts.token, client ? { client } : undefined);
+  const cachedBotInfo = readCachedTelegramBotInfo({
+    token: opts.token,
+    options: {
+      accountId: account.accountId,
+      proxyUrl: telegramCfg.proxy,
+      network: telegramCfg.network,
+      apiRoot: telegramCfg.apiRoot,
+      getMeCacheMode: telegramCfg.getMeCacheMode,
+    },
+  });
+
+  const bot = new botRuntime.Bot(opts.token, {
+    ...(client ? { client } : {}),
+    ...(cachedBotInfo ? { botInfo: cachedBotInfo } : {}),
+  });
   bot.api.config.use(botRuntime.apiThrottler());
   // Catch all errors from bot middleware to prevent unhandled rejections
   bot.catch((err) => {

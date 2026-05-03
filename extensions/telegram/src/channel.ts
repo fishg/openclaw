@@ -160,6 +160,7 @@ function startTelegramAccountProbeInBackground(params: {
     network: params.account.config.network,
     apiRoot: params.account.config.apiRoot,
     includeWebhookInfo: false,
+    getMeCacheMode: params.account.config.getMeCacheMode,
   })
     .then((probe) => {
       const username = probe.ok ? probe.bot?.username?.trim() : null;
@@ -825,6 +826,7 @@ export const telegramPlugin = createChatChannelPlugin({
           network: account.config.network,
           apiRoot: account.config.apiRoot,
           includeWebhookInfo: Boolean(account.config.webhookUrl),
+          getMeCacheMode: account.config.getMeCacheMode,
         }),
       formatCapabilitiesProbe: ({ probe }) => {
         const lines = [];
@@ -946,6 +948,7 @@ export const telegramPlugin = createChatChannelPlugin({
               network: account.config.network,
               apiRoot: account.config.apiRoot,
               includeWebhookInfo: false,
+              getMeCacheMode: account.config.getMeCacheMode,
             },
           );
           const username = probe.ok ? probe.bot?.username?.trim() : null;

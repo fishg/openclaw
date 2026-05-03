@@ -1,6 +1,10 @@
 import { withFetchPreconnect } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
-import { probeTelegram, resetTelegramProbeFetcherCacheForTests } from "./probe.js";
+import {
+  primeTelegramProbeSuccessCacheForTests,
+  probeTelegram,
+  resetTelegramProbeFetcherCacheForTests,
+} from "./probe.js";
 
 const resolveTelegramFetch = vi.hoisted(() => vi.fn());
 const makeProxyFetch = vi.hoisted(() => vi.fn());
@@ -285,5 +289,79 @@ describe("probeTelegram retry logic", () => {
     });
 
     expect(resolveTelegramFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses the last successful getMe result for 24 hours by default", async () => {
+    const fetchMock = installFetchMock();
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "production");
+
+    mockGetMeSuccess(fetchMock);
+    mockGetWebhookInfoSuccess(fetchMock);
+    const first = await probeTelegram(`${token}-success-cache`, timeoutMs, {
+      accountId: "main",
+    });
+
+    const second = await probeTelegram(`${token}-success-cache`, timeoutMs, {
+      accountId: "main",
+    });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(second.elapsedMs).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("can restore legacy uncached getMe probe behavior", async () => {
+    const fetchMock = installFetchMock();
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "production");
+
+    mockGetMeSuccess(fetchMock);
+    mockGetWebhookInfoSuccess(fetchMock);
+    await probeTelegram(`${token}-legacy-cache`, timeoutMs, {
+      accountId: "main",
+      getMeCacheMode: "legacy",
+    });
+
+    mockGetMeSuccess(fetchMock);
+    mockGetWebhookInfoSuccess(fetchMock);
+    await probeTelegram(`${token}-legacy-cache`, timeoutMs, {
+      accountId: "main",
+      getMeCacheMode: "legacy",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("fills missing webhook info from cache without repeating getMe", async () => {
+    const fetchMock = installFetchMock();
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "production");
+
+    primeTelegramProbeSuccessCacheForTests({
+      token: `${token}-cached-webhook`,
+      options: { accountId: "main" },
+      botInfo: {
+        id: 123,
+        is_bot: true,
+        first_name: "Test",
+        username: "test_bot",
+        can_join_groups: true,
+      },
+    });
+
+    mockGetWebhookInfoSuccess(fetchMock);
+    const result = await probeTelegram(`${token}-cached-webhook`, timeoutMs, {
+      accountId: "main",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.bot?.username).toBe("test_bot");
+    expect(result.webhook?.url).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.telegram.org/bottest-token-cached-webhook/getWebhookInfo",
+    );
   });
 });

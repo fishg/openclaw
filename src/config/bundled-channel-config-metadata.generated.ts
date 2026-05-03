@@ -14128,6 +14128,10 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
           exclusiveMinimum: 0,
           maximum: 9007199254740991,
         },
+        getMeCacheMode: {
+          type: "string",
+          enum: ["success-24h", "legacy"],
+        },
         pollingStallThresholdMs: {
           type: "integer",
           minimum: 30000,
@@ -15190,6 +15194,10 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                 exclusiveMinimum: 0,
                 maximum: 9007199254740991,
               },
+              getMeCacheMode: {
+                type: "string",
+                enum: ["success-24h", "legacy"],
+              },
               pollingStallThresholdMs: {
                 type: "integer",
                 minimum: 30000,
@@ -15593,6 +15601,10 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
       timeoutSeconds: {
         label: "Telegram API Timeout (seconds)",
         help: "Max seconds before Telegram API requests are aborted (default: 500 per grammY).",
+      },
+      getMeCacheMode: {
+        label: "Telegram getMe Cache Mode",
+        help: 'Controls redundant Telegram getMe probes: "success-24h" (default) reuses the last successful bot identity for 24 hours, while "legacy" restores the previous uncached behavior.',
       },
       pollingStallThresholdMs: {
         label: "Telegram Polling Stall Threshold (ms)",
