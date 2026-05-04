@@ -3,14 +3,22 @@ import type { FollowupRun } from "./queue.js";
 
 const hoisted = vi.hoisted(() => {
   const resolveEffectiveModelFallbacksMock = vi.fn();
+  const resolveAgentModelFallbacksOverrideMock = vi.fn();
   const getChannelPluginMock = vi.fn();
   const isReasoningTagProviderMock = vi.fn();
-  return { resolveEffectiveModelFallbacksMock, getChannelPluginMock, isReasoningTagProviderMock };
+  return {
+    resolveEffectiveModelFallbacksMock,
+    resolveAgentModelFallbacksOverrideMock,
+    getChannelPluginMock,
+    isReasoningTagProviderMock,
+  };
 });
 
 vi.mock("../../agents/agent-scope.js", () => ({
   resolveEffectiveModelFallbacks: (...args: unknown[]) =>
     hoisted.resolveEffectiveModelFallbacksMock(...args),
+  resolveAgentModelFallbacksOverride: (...args: unknown[]) =>
+    hoisted.resolveAgentModelFallbacksOverrideMock(...args),
 }));
 
 vi.mock("../../channels/plugins/index.js", () => ({
@@ -57,6 +65,8 @@ function makeRun(overrides: Partial<FollowupRun["run"]> = {}): FollowupRun["run"
 describe("agent-runner-utils", () => {
   beforeEach(() => {
     hoisted.resolveEffectiveModelFallbacksMock.mockClear();
+    hoisted.resolveAgentModelFallbacksOverrideMock.mockReset();
+    hoisted.resolveAgentModelFallbacksOverrideMock.mockReturnValue(undefined);
     hoisted.getChannelPluginMock.mockReset();
     hoisted.isReasoningTagProviderMock.mockReset();
     hoisted.isReasoningTagProviderMock.mockReturnValue(false);
@@ -96,6 +106,51 @@ describe("agent-runner-utils", () => {
       modelOverrideSource: undefined,
     });
     expect(resolved.fallbacksOverride).toEqual(["fallback-model"]);
+  });
+
+  it("restores configured fallback candidates for execution when user override cleared them", () => {
+    hoisted.resolveEffectiveModelFallbacksMock.mockReturnValue([]);
+    const run = makeRun({
+      hasSessionModelOverride: true,
+      modelOverrideSource: "user",
+      config: {
+        agents: {
+          defaults: {
+            model: {
+              primary: "openai/gpt-5.4",
+              fallbacks: ["openai-codex/gpt-5.2"],
+            },
+          },
+        },
+      } as never,
+    });
+
+    const resolved = resolveModelFallbackOptions(run);
+
+    expect(resolved.fallbacksOverride).toEqual(["openai-codex/gpt-5.2"]);
+  });
+
+  it("respects an explicit empty agent fallback override during execution", () => {
+    hoisted.resolveEffectiveModelFallbacksMock.mockReturnValue([]);
+    hoisted.resolveAgentModelFallbacksOverrideMock.mockReturnValue([]);
+    const run = makeRun({
+      hasSessionModelOverride: true,
+      modelOverrideSource: "user",
+      config: {
+        agents: {
+          defaults: {
+            model: {
+              primary: "openai/gpt-5.4",
+              fallbacks: ["openai-codex/gpt-5.2"],
+            },
+          },
+        },
+      } as never,
+    });
+
+    const resolved = resolveModelFallbackOptions(run);
+
+    expect(resolved.fallbacksOverride).toEqual([]);
   });
 
   it("builds embedded run base params with auth profile and run metadata", () => {

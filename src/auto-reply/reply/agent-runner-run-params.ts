@@ -1,4 +1,8 @@
-import { resolveEffectiveModelFallbacks } from "../../agents/agent-scope.js";
+import {
+  resolveAgentModelFallbacksOverride,
+  resolveEffectiveModelFallbacks,
+} from "../../agents/agent-scope.js";
+import { resolveAgentModelFallbackValues } from "../../config/model-input.js";
 import type { resolveProviderScopedAuthProfile } from "./agent-runner-auth-profile.js";
 import type { FollowupRun } from "./queue.js";
 
@@ -31,17 +35,13 @@ export function resolveModelFallbackOptions(
   configOverride: FollowupRun["run"]["config"] = run.config,
 ) {
   const config = configOverride;
+  const fallbacksOverride = resolveExecutionModelFallbacks(run, config);
   return {
     cfg: config,
     provider: run.provider,
     model: run.model,
     agentDir: run.agentDir,
-    fallbacksOverride: resolveEffectiveModelFallbacks({
-      cfg: config,
-      agentId: run.agentId,
-      hasSessionModelOverride: run.hasSessionModelOverride === true,
-      modelOverrideSource: run.modelOverrideSource,
-    }),
+    fallbacksOverride,
   };
 }
 
@@ -55,12 +55,7 @@ export function buildEmbeddedRunBaseParams(params: {
   isReasoningTagProvider?: ReasoningTagProviderResolver;
 }) {
   const config = params.run.config;
-  const modelFallbacksOverride = resolveEffectiveModelFallbacks({
-    cfg: config,
-    agentId: params.run.agentId,
-    hasSessionModelOverride: params.run.hasSessionModelOverride === true,
-    modelOverrideSource: params.run.modelOverrideSource,
-  });
+  const modelFallbacksOverride = resolveExecutionModelFallbacks(params.run, config);
   return {
     sessionFile: params.run.sessionFile,
     workspaceDir: params.run.workspaceDir,
@@ -93,4 +88,31 @@ export function buildEmbeddedRunBaseParams(params: {
     runId: params.runId,
     allowTransientCooldownProbe: params.allowTransientCooldownProbe,
   };
+}
+
+function resolveExecutionModelFallbacks(
+  run: FollowupRun["run"],
+  config: FollowupRun["run"]["config"],
+): string[] | undefined {
+  const resolved = resolveEffectiveModelFallbacks({
+    cfg: config,
+    agentId: run.agentId,
+    hasSessionModelOverride: run.hasSessionModelOverride === true,
+    modelOverrideSource: run.modelOverrideSource,
+  });
+  if (
+    run.hasSessionModelOverride === true &&
+    run.modelOverrideSource === "user" &&
+    Array.isArray(resolved) &&
+    resolved.length === 0
+  ) {
+    if (run.agentId) {
+      const agentOverride = resolveAgentModelFallbacksOverride(config, run.agentId);
+      if (agentOverride !== undefined) {
+        return agentOverride;
+      }
+    }
+    return resolveAgentModelFallbackValues(config.agents?.defaults?.model);
+  }
+  return resolved;
 }

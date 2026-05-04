@@ -2233,6 +2233,53 @@ describe("runAgentTurnWithFallback", () => {
     },
   );
 
+  it.each(["group", "channel"] as const)(
+    "keeps fallback exhaustion visible in Discord %s chats",
+    async (chatType) => {
+      state.runWithModelFallbackMock.mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            "All models failed (1): inroi-gpt/gpt-5.4: 403 Your request was blocked. (auth)",
+          ),
+          {
+            name: "FallbackSummaryError",
+            attempts: [
+              {
+                provider: "inroi-gpt",
+                model: "gpt-5.4",
+                error: "403 Your request was blocked.",
+                reason: "auth",
+              },
+            ],
+            soonestCooldownExpiry: null,
+          },
+        ),
+      );
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const result = await runAgentTurnWithFallback(
+        createMinimalRunAgentTurnParams({
+          sessionCtx: {
+            Provider: "discord",
+            Surface: "discord",
+            ChatType: chatType,
+            GroupSubject: "agent group",
+            GroupChannel: "#general",
+            MessageSid: "msg",
+          } as unknown as TemplateContext,
+        }),
+      );
+
+      expect(result.kind).toBe("final");
+      if (result.kind === "final") {
+        expect(result.payload.text).toBe(
+          "⚠️ All model attempts failed. Last error from inroi-gpt/gpt-5.4: 403 Your request was blocked. (auth)",
+        );
+        expect(result.payload.isError).toBe(true);
+      }
+    },
+  );
+
   it("uses compact generic copy for raw runner failures in normal Discord direct chats", async () => {
     state.runEmbeddedPiAgentMock.mockRejectedValueOnce(
       new Error("openai-codex/gpt-5.5 ended with an incomplete terminal response"),
@@ -2253,6 +2300,44 @@ describe("runAgentTurnWithFallback", () => {
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
       expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+    }
+  });
+
+  it("surfaces the last fallback failure detail for exhausted candidates", async () => {
+    state.runWithModelFallbackMock.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "All models failed (2): google/gemini: nope (auth) | openai-codex/gpt-5.2: 403 blocked",
+        ),
+        {
+          name: "FallbackSummaryError",
+          attempts: [
+            {
+              provider: "google",
+              model: "gemini",
+              error: "nope",
+              reason: "auth",
+            },
+            {
+              provider: "openai-codex",
+              model: "gpt-5.2",
+              error: "403 blocked",
+            },
+          ],
+          soonestCooldownExpiry: null,
+        },
+      ),
+    );
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(createMinimalRunAgentTurnParams());
+
+    expect(result.kind).toBe("final");
+    if (result.kind === "final") {
+      expect(result.payload.text).toBe(
+        "⚠️ All model attempts failed (2 attempts). Last error from openai-codex/gpt-5.2: 403 blocked.",
+      );
+      expect(result.payload.isError).toBe(true);
     }
   });
 

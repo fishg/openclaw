@@ -390,6 +390,37 @@ function resolveExternalRunFailureTextForConversation(params: {
   return SILENT_REPLY_TOKEN;
 }
 
+function buildFallbackSummaryFailureText(err: unknown): string | null {
+  if (!isFallbackSummaryError(err) || err.attempts.length === 0) {
+    return null;
+  }
+  if (
+    err.attempts.some(
+      (attempt) =>
+        attempt.reason === "billing" ||
+        attempt.reason === "rate_limit" ||
+        attempt.reason === "overloaded",
+    )
+  ) {
+    return null;
+  }
+  const lastAttempt = err.attempts[err.attempts.length - 1];
+  const modelLabel = `${lastAttempt.provider}/${lastAttempt.model}`;
+  const rawDetail = collapseRepeatedFailureDetail(lastAttempt.error || err.message);
+  const sanitizedDetail = sanitizeUserFacingText(rawDetail, { errorContext: true })
+    .trim()
+    .replace(/^⚠️\s*/u, "")
+    .replace(/\s+/gu, " ");
+  const detail = sanitizedDetail || "Unknown error";
+  const reasonSuffix =
+    lastAttempt.reason && !detail.toLowerCase().includes(`(${lastAttempt.reason.toLowerCase()})`)
+      ? ` (${lastAttempt.reason})`
+      : "";
+  const attemptCountLabel = err.attempts.length > 1 ? ` (${err.attempts.length} attempts)` : "";
+  const suffix = /[.!?]$/u.test(detail) || reasonSuffix ? "" : ".";
+  return `⚠️ All model attempts failed${attemptCountLabel}. Last error from ${modelLabel}: ${detail}${reasonSuffix}${suffix}`;
+}
+
 function buildMissingApiKeyFailureText(message: string): string | null {
   const normalizedMessage = collapseRepeatedFailureDetail(message);
   const providerMatch = normalizedMessage.match(/No API key found for provider "([^"]+)"/u);
@@ -1957,6 +1988,10 @@ export async function runAgentTurnWithFallback(params: {
         ? sanitizeUserFacingText(message, { errorContext: true })
         : message;
       const trimmedMessage = safeMessage.replace(/\.\s*$/, "");
+      const fallbackSummaryFailureText =
+        !isBilling && !isRateLimit && !rateLimitOrOverloadedCopy && !shouldSurfaceToControlUi
+          ? buildFallbackSummaryFailureText(err)
+          : null;
       const externalRunFailureReply =
         !isBilling &&
         !(isRateLimit && !isOverloadedErrorMessage(message)) &&
@@ -1964,9 +1999,14 @@ export async function runAgentTurnWithFallback(params: {
         !isContextOverflow &&
         !isRoleOrderingError &&
         !shouldSurfaceToControlUi
-          ? buildExternalRunFailureReply(message, {
-              includeDetails: isVerboseFailureDetailEnabled(params.resolvedVerboseLevel),
-            })
+          ? fallbackSummaryFailureText
+            ? {
+                text: fallbackSummaryFailureText,
+                isGenericRunnerFailure: false,
+              }
+            : buildExternalRunFailureReply(message, {
+                includeDetails: isVerboseFailureDetailEnabled(params.resolvedVerboseLevel),
+              })
           : undefined;
       const fallbackText = isBilling
         ? BILLING_ERROR_USER_MESSAGE
@@ -1992,6 +2032,9 @@ export async function runAgentTurnWithFallback(params: {
         kind: "final",
         payload: {
           text: userVisibleFallbackText,
+          ...(fallbackSummaryFailureText && userVisibleFallbackText !== SILENT_REPLY_TOKEN
+            ? { isError: true }
+            : {}),
         },
       };
     }
