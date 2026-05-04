@@ -76,6 +76,48 @@ function shouldApplyOpenAIReasoningCompatibility(model: {
   return resolveOpenAIRequestCapabilities(model).supportsOpenAIReasoningCompatPayload;
 }
 
+function canInjectOpenAIResponsesReasoningPayload(model: {
+  api?: unknown;
+  provider?: unknown;
+  id?: unknown;
+  baseUrl?: unknown;
+  compat?: unknown;
+  reasoning?: unknown;
+  reasoningExplicit?: unknown;
+}): boolean {
+  if (shouldApplyOpenAIReasoningCompatibility(model)) {
+    return true;
+  }
+  const provider = readStringValue(model.provider);
+  const api = readStringValue(model.api);
+  const reasoningExplicit = model.reasoningExplicit === true;
+  const reasoning = model.reasoning;
+  if (reasoningExplicit && reasoning === false) {
+    return false;
+  }
+  if (
+    provider === "openai" ||
+    provider === "openai-codex" ||
+    provider === "azure-openai" ||
+    provider === "azure-openai-responses"
+  ) {
+    return false;
+  }
+  if (
+    api !== "openai-responses" &&
+    api !== "openai-codex-responses" &&
+    api !== "azure-openai-responses"
+  ) {
+    return false;
+  }
+  return (
+    resolveOpenAIReasoningEffortForModel({
+      model,
+      effort: "high",
+    }) !== undefined
+  );
+}
+
 function shouldFlattenOpenAICompletionMessages(model: {
   api?: unknown;
   compat?: unknown;
@@ -301,7 +343,7 @@ export function createOpenAIThinkingLevelWrapper(
     return underlying;
   }
   return (model, context, options) => {
-    if (!shouldApplyOpenAIReasoningCompatibility(model)) {
+    if (!canInjectOpenAIResponsesReasoningPayload(model)) {
       if (thinkingLevel === "off") {
         return underlying(model, context, options);
       }
@@ -323,8 +365,14 @@ export function createOpenAIThinkingLevelWrapper(
         payloadObj,
         thinkingLevel,
       });
+      if (existingReasoning === undefined) {
+        payloadObj.reasoning = { effort: reasoningEffort };
+        raiseMinimalReasoningForResponsesWebSearchPayload({ model, payloadObj });
+        return;
+      }
       if (existingReasoning === "none") {
         payloadObj.reasoning = { effort: reasoningEffort };
+        raiseMinimalReasoningForResponsesWebSearchPayload({ model, payloadObj });
         return;
       }
       if (

@@ -3758,6 +3758,59 @@ describe("applyExtraParamsToAgent", () => {
     expect(payload.context_management).toEqual([{ type: "compaction", compact_threshold: 12_345 }]);
   });
 
+  it("injects reasoning for custom OpenAI Responses providers when thinking is enabled", () => {
+    const payload = runResponsesPayloadMutationCase({
+      applyProvider: "custom-openai-responses",
+      applyModelId: "gpt-5.4",
+      model: {
+        api: "openai-responses",
+        provider: "custom-openai-responses",
+        id: "gpt-5.4",
+        name: "gpt-5.4",
+        baseUrl: "https://proxy.example.com/v1",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 307_200,
+        contextTokens: 272_000,
+        maxTokens: 131_072,
+      } as unknown as Model<"openai-responses">,
+      payload: {
+        store: false,
+      },
+      thinkingLevel: "high",
+    });
+
+    expect(payload.reasoning).toEqual({ effort: "high" });
+  });
+
+  it("does not inject reasoning for custom OpenAI Responses providers when reasoning is explicitly disabled", () => {
+    const payload = runResponsesPayloadMutationCase({
+      applyProvider: "custom-openai-responses",
+      applyModelId: "gpt-5.4",
+      model: {
+        api: "openai-responses",
+        provider: "custom-openai-responses",
+        id: "gpt-5.4",
+        name: "gpt-5.4",
+        baseUrl: "https://proxy.example.com/v1",
+        reasoning: false,
+        reasoningExplicit: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 307_200,
+        contextTokens: 272_000,
+        maxTokens: 131_072,
+      } as unknown as Model<"openai-responses">,
+      payload: {
+        store: false,
+      },
+      thinkingLevel: "high",
+    });
+
+    expect(payload).not.toHaveProperty("reasoning");
+  });
+
   it("auto-injects OpenAI Responses context_management compaction for direct OpenAI models", () => {
     const payload = runResponsesPayloadMutationCase({
       applyProvider: "openai",

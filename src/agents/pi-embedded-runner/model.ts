@@ -850,6 +850,7 @@ function resolveConfiguredFallbackModel(params: {
         provider,
         baseUrl: requestConfig.baseUrl,
         reasoning: configuredModel?.reasoning ?? false,
+        reasoningExplicit: typeof configuredModel?.reasoning === "boolean",
         input: resolveProviderModelInput({
           provider,
           modelId,

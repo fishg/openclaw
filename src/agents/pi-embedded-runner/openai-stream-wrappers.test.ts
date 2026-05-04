@@ -82,10 +82,46 @@ describe("createOpenAIThinkingLevelWrapper", () => {
     expect(payloads[0]?.reasoning).toEqual({ effort: "low" });
   });
 
-  it("does not add reasoning for non-reasoning models without existing reasoning payload", () => {
+  it("injects reasoning when a supported OpenAI Responses model has no existing reasoning payload", () => {
     const { baseStreamFn, payloads } = createPayloadCapture();
     const wrapped = createOpenAIThinkingLevelWrapper(baseStreamFn, "medium");
     void wrapped(openaiModel, { messages: [] }, {});
+
+    expect(payloads[0]?.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("injects reasoning for custom OpenAI Responses providers when the model id supports effort mapping", () => {
+    const { baseStreamFn, payloads } = createPayloadCapture();
+    const wrapped = createOpenAIThinkingLevelWrapper(baseStreamFn, "high");
+    void wrapped(
+      {
+        api: "openai-responses",
+        provider: "SG03GPT",
+        id: "gpt-5.4",
+        baseUrl: "https://isolldogate.apphaodian.com/v1",
+      } as Model<"openai-responses">,
+      { messages: [] },
+      {},
+    );
+
+    expect(payloads[0]?.reasoning).toEqual({ effort: "high" });
+  });
+
+  it("does not inject reasoning for custom OpenAI Responses providers when reasoning is explicitly disabled", () => {
+    const { baseStreamFn, payloads } = createPayloadCapture();
+    const wrapped = createOpenAIThinkingLevelWrapper(baseStreamFn, "high");
+    void wrapped(
+      {
+        api: "openai-responses",
+        provider: "SG03GPT",
+        id: "gpt-5.4",
+        baseUrl: "https://isolldogate.apphaodian.com/v1",
+        reasoning: false,
+        reasoningExplicit: true,
+      } as Model<"openai-responses">,
+      { messages: [] },
+      {},
+    );
 
     expect(payloads[0]?.reasoning).toBeUndefined();
   });

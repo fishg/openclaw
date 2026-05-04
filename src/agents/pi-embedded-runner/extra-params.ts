@@ -21,6 +21,7 @@ import {
   shouldApplySiliconFlowThinkingOffCompat,
 } from "./moonshot-stream-wrappers.js";
 import {
+  createOpenAIThinkingLevelWrapper,
   createOpenAIResponsesContextManagementWrapper,
   createOpenAIStringContentWrapper,
 } from "./openai-stream-wrappers.js";
@@ -153,6 +154,7 @@ function fingerprintPreparedExtraParamsModel(model?: ProviderRuntimeModel): unkn
     name: model.name,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
+    reasoningExplicit: record.reasoningExplicit ?? null,
     input: model.input,
     cost: model.cost,
     compat: record.compat ?? null,
@@ -630,6 +632,8 @@ function applyPostPluginStreamWrappers(
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
 
   if (!ctx.providerWrapperHandled) {
+    ctx.agent.streamFn = createOpenAIThinkingLevelWrapper(ctx.agent.streamFn, ctx.thinkingLevel);
+
     // Guard Google-family payloads against invalid negative thinking budgets
     // emitted by upstream model-ID heuristics for Gemini 3.1 variants.
     ctx.agent.streamFn = createGoogleThinkingPayloadWrapper(ctx.agent.streamFn, ctx.thinkingLevel);

@@ -8,4 +8,5 @@ export type ProviderRuntimeModel = Model<Api> & {
   contextTokens?: number;
   params?: Record<string, unknown>;
   requestTimeoutMs?: number;
+  reasoningExplicit?: boolean;
 };
