@@ -9,6 +9,7 @@ Docs: https://docs.openclaw.ai
 - Docker/Gateway: harden the gateway container by dropping `NET_RAW` and `NET_ADMIN` capabilities and enabling `no-new-privileges` in the bundled `docker-compose.yml`. Thanks @VintageAyu.
 - OpenAI/Gateway: flush the initial chat stream chunk correctly so first-token streaming is visible instead of being delayed behind later chunks.
 - Gateway/media: skip media sidecar handling for unrelated HTTP routes so non-media requests do not pay the media route behavior.
+- Discord: show reasoning text in progress drafts so streaming replies expose useful thinking/progress instead of blank draft updates.
 - Auth profiles: avoid putting providers on cooldown for format-level rejections, so fallback profiles can still be tried when a model name is unsupported.
 - Update: stop dev-channel updates cleanly after a fetch failure instead of continuing into later update steps.
 - Agents/generated media: treat attachment-style message tool actions as completed chat sends, preventing duplicate fallback media posts when generated files were already uploaded.
