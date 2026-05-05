@@ -7,6 +7,13 @@ import {
 import { listChannelPluginCatalogEntries } from "../../../channels/plugins/catalog.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../../../config/types.plugins.js";
+import { parseClawHubPluginSpec } from "../../../infra/clawhub-spec.js";
+import {
+  isExactSemverVersion,
+  isPrereleaseSemverVersion,
+  parseRegistryNpmSpec,
+} from "../../../infra/npm-registry-spec.js";
+import { resolveConfiguredChannelPresencePolicy } from "../../../plugins/channel-plugin-ids.js";
 import { buildClawHubPluginInstallRecordFields } from "../../../plugins/clawhub-install-records.js";
 import { CLAWHUB_INSTALL_ERROR_CODE, installPluginFromClawHub } from "../../../plugins/clawhub.js";
 import { resolveDefaultPluginExtensionsDir } from "../../../plugins/install-paths.js";
@@ -27,7 +34,9 @@ import type { PluginMetadataSnapshot } from "../../../plugins/plugin-metadata-sn
 import { resolveProviderInstallCatalogEntries } from "../../../plugins/provider-install-catalog.js";
 import { updateNpmInstalledPlugins } from "../../../plugins/update.js";
 import { resolveWebSearchInstallCatalogEntry } from "../../../plugins/web-search-install-catalog.js";
+import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { resolveUserPath } from "../../../utils.js";
+import { VERSION } from "../../../version.js";
 import { asObjectRecord } from "./object.js";
 
 type DownloadableInstallCandidate = {
@@ -36,6 +45,7 @@ type DownloadableInstallCandidate = {
   npmSpec?: string;
   clawhubSpec?: string;
   expectedIntegrity?: string;
+  trustedSourceLinkedOfficialInstall?: boolean;
   defaultChoice?: PluginPackageInstall["defaultChoice"];
 };
 
@@ -44,12 +54,14 @@ const RUNTIME_PLUGIN_INSTALL_CANDIDATES: readonly DownloadableInstallCandidate[]
     pluginId: "acpx",
     label: "ACPX Runtime",
     npmSpec: "@openclaw/acpx",
+    trustedSourceLinkedOfficialInstall: true,
   },
   // Runtime-only configs do not have a provider/channel integration catalog entry.
   {
     pluginId: "codex",
     label: "Codex",
     npmSpec: "@openclaw/codex",
+    trustedSourceLinkedOfficialInstall: true,
   },
 ];
 
@@ -102,10 +114,6 @@ function collectConfiguredPluginIds(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv
   if (plugins?.enabled === false) {
     return ids;
   }
-  const allow = Array.isArray(plugins?.allow) ? plugins.allow : [];
-  for (const value of allow) {
-    addConfiguredPluginId(ids, value);
-  }
   const entries = asObjectRecord(plugins?.entries);
   for (const [pluginId, entry] of Object.entries(entries ?? {})) {
     if (asObjectRecord(entry)?.enabled === false) {
@@ -134,6 +142,25 @@ function collectConfiguredPluginIds(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv
   return ids;
 }
 
+function collectBlockedPluginIds(cfg: OpenClawConfig): Set<string> {
+  const ids = new Set<string>();
+  const deny = cfg.plugins?.deny;
+  if (Array.isArray(deny)) {
+    for (const pluginId of deny) {
+      if (typeof pluginId === "string" && pluginId.trim()) {
+        ids.add(pluginId.trim());
+      }
+    }
+  }
+  const entries = asObjectRecord(cfg.plugins?.entries);
+  for (const [pluginId, entry] of Object.entries(entries ?? {})) {
+    if (pluginId.trim() && asObjectRecord(entry)?.enabled === false) {
+      ids.add(pluginId.trim());
+    }
+  }
+  return ids;
+}
+
 function collectConfiguredChannelIds(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv): Set<string> {
   const ids = new Set<string>();
   if (asObjectRecord(cfg.plugins)?.enabled === false) {
@@ -156,12 +183,45 @@ function collectConfiguredChannelIds(cfg: OpenClawConfig, env?: NodeJS.ProcessEn
   return ids;
 }
 
+function collectEffectiveConfiguredChannelOwnerPluginIds(params: {
+  cfg: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  snapshot: PluginMetadataSnapshot;
+  configuredChannelIds: ReadonlySet<string>;
+}): Map<string, Set<string>> {
+  const owners = new Map<string, Set<string>>();
+  const configuredChannelIds = new Set(
+    [...params.configuredChannelIds]
+      .map((channelId) => normalizeOptionalLowercaseString(channelId))
+      .filter((channelId): channelId is string => Boolean(channelId)),
+  );
+  if (configuredChannelIds.size === 0) {
+    return owners;
+  }
+  for (const entry of resolveConfiguredChannelPresencePolicy({
+    config: params.cfg,
+    env: params.env,
+    includePersistedAuthState: false,
+    manifestRecords: params.snapshot.plugins,
+  })) {
+    if (!entry.effective || !configuredChannelIds.has(entry.channelId)) {
+      continue;
+    }
+    const pluginIds = new Set(entry.pluginIds);
+    if (pluginIds.size > 0) {
+      owners.set(entry.channelId, pluginIds);
+    }
+  }
+  return owners;
+}
+
 function collectDownloadableInstallCandidates(params: {
   cfg: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   missingPluginIds: ReadonlySet<string>;
   configuredPluginIds?: ReadonlySet<string>;
   configuredChannelIds?: ReadonlySet<string>;
+  configuredChannelOwnerPluginIds?: ReadonlyMap<string, ReadonlySet<string>>;
   blockedPluginIds?: ReadonlySet<string>;
 }): DownloadableInstallCandidate[] {
   const configuredPluginIds =
@@ -178,7 +238,23 @@ function collectDownloadableInstallCandidates(params: {
       continue;
     }
     const pluginId = entry.pluginId ?? entry.id;
+    const channelId = normalizeOptionalLowercaseString(entry.id);
     if (params.blockedPluginIds?.has(pluginId)) {
+      continue;
+    }
+    const selectedOnlyByChannel =
+      !params.missingPluginIds.has(pluginId) &&
+      !configuredPluginIds.has(pluginId) &&
+      (channelId ? configuredChannelIds.has(channelId) : configuredChannelIds.has(entry.id));
+    const configuredChannelOwnerPluginIds = channelId
+      ? params.configuredChannelOwnerPluginIds?.get(channelId)
+      : undefined;
+    if (
+      selectedOnlyByChannel &&
+      configuredChannelOwnerPluginIds &&
+      configuredChannelOwnerPluginIds.size > 0 &&
+      !configuredChannelOwnerPluginIds.has(pluginId)
+    ) {
       continue;
     }
     if (
@@ -200,6 +276,9 @@ function collectDownloadableInstallCandidates(params: {
       ...(clawhubSpec ? { clawhubSpec } : {}),
       ...(entry.install.expectedIntegrity
         ? { expectedIntegrity: entry.install.expectedIntegrity }
+        : {}),
+      ...(entry.trustedSourceLinkedOfficialInstall
+        ? { trustedSourceLinkedOfficialInstall: true }
         : {}),
       ...(entry.install.defaultChoice ? { defaultChoice: entry.install.defaultChoice } : {}),
     });
@@ -229,6 +308,7 @@ function collectDownloadableInstallCandidates(params: {
       ...(entry.install.expectedIntegrity
         ? { expectedIntegrity: entry.install.expectedIntegrity }
         : {}),
+      ...(entry.origin === "bundled" ? { trustedSourceLinkedOfficialInstall: true } : {}),
       ...(entry.install.defaultChoice ? { defaultChoice: entry.install.defaultChoice } : {}),
     });
   }
@@ -256,6 +336,7 @@ function collectDownloadableInstallCandidates(params: {
       ...(npmSpec ? { npmSpec } : {}),
       ...(clawhubSpec ? { clawhubSpec } : {}),
       ...(install.expectedIntegrity ? { expectedIntegrity: install.expectedIntegrity } : {}),
+      trustedSourceLinkedOfficialInstall: true,
       ...(install.defaultChoice ? { defaultChoice: install.defaultChoice } : {}),
     });
   }
@@ -267,7 +348,9 @@ function collectDownloadableInstallCandidates(params: {
     if (params.blockedPluginIds?.has(entry.pluginId)) {
       continue;
     }
-    candidates.set(entry.pluginId, entry);
+    if (!candidates.has(entry.pluginId)) {
+      candidates.set(entry.pluginId, entry);
+    }
   }
 
   return [...candidates.values()].toSorted((left, right) =>
@@ -280,6 +363,7 @@ function collectUpdateDeferredPluginIds(params: {
   env: NodeJS.ProcessEnv;
   configuredPluginIds: ReadonlySet<string>;
   configuredChannelIds: ReadonlySet<string>;
+  configuredChannelOwnerPluginIds?: ReadonlyMap<string, ReadonlySet<string>>;
   blockedPluginIds?: ReadonlySet<string>;
 }): Set<string> {
   const pluginIds = new Set(params.configuredPluginIds);
@@ -289,6 +373,7 @@ function collectUpdateDeferredPluginIds(params: {
     missingPluginIds: new Set(),
     configuredPluginIds: params.configuredPluginIds,
     configuredChannelIds: params.configuredChannelIds,
+    configuredChannelOwnerPluginIds: params.configuredChannelOwnerPluginIds,
     blockedPluginIds: params.blockedPluginIds,
   })) {
     pluginIds.add(candidate.pluginId);
@@ -344,16 +429,59 @@ function recordMatchesBundledPackage(
     return false;
   }
   if (record.source === "npm") {
-    return [record.spec, record.resolvedName, record.resolvedSpec].some((value) =>
-      value?.trim().startsWith(packageName),
+    return [record.spec, record.resolvedName, record.resolvedSpec].some(
+      (value) => recordNpmPackageName(value) === packageName,
     );
   }
   if (record.source === "clawhub") {
-    return [record.clawhubPackage, record.spec].some((value) =>
-      value?.trim().includes(packageName),
+    return [record.clawhubPackage, record.spec].some(
+      (value) => recordClawHubPackageName(value) === packageName,
     );
   }
   return false;
+}
+
+function recordNpmPackageName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? parseRegistryNpmSpec(trimmed)?.name : undefined;
+}
+
+function recordClawHubPackageName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return parseClawHubPluginSpec(trimmed)?.name ?? trimmed;
+}
+
+function resolveVersionAlignedOfficialNpmSpec(
+  candidate: DownloadableInstallCandidate,
+): string | undefined {
+  const npmSpec = candidate.npmSpec?.trim();
+  if (!npmSpec || !candidate.trustedSourceLinkedOfficialInstall) {
+    return npmSpec;
+  }
+  const parsed = parseRegistryNpmSpec(npmSpec);
+  if (!parsed || !parsed.name.startsWith("@openclaw/")) {
+    return npmSpec;
+  }
+  if (parsed.selectorKind === "exact-version") {
+    return npmSpec;
+  }
+  const hostVersion = VERSION.trim();
+  if (!isExactSemverVersion(hostVersion)) {
+    return npmSpec;
+  }
+  if (isPrereleaseSemverVersion(hostVersion)) {
+    const prerelease = /^[0-9]+\.[0-9]+\.[0-9]+-([0-9A-Za-z._-]+)(?:\+.*)?$/u.exec(
+      hostVersion,
+    )?.[1];
+    const prereleaseTag = prerelease?.split(/[.-]/u)[0];
+    return prereleaseTag && /^[A-Za-z][A-Za-z0-9._-]*$/u.test(prereleaseTag)
+      ? `${parsed.name}@${prereleaseTag}`
+      : npmSpec;
+  }
+  return `${parsed.name}@${hostVersion}`;
 }
 
 async function installCandidate(params: {
@@ -405,7 +533,8 @@ async function installCandidate(params: {
       `ClawHub ${candidate.clawhubSpec} unavailable for "${candidate.pluginId}"; falling back to npm ${candidate.npmSpec}.`,
     );
   }
-  if (!candidate.npmSpec) {
+  const npmSpec = resolveVersionAlignedOfficialNpmSpec(candidate);
+  if (!npmSpec) {
     return {
       records: params.records,
       changes: [],
@@ -415,10 +544,13 @@ async function installCandidate(params: {
     };
   }
   const result = await installPluginFromNpmSpec({
-    spec: candidate.npmSpec,
+    spec: npmSpec,
     extensionsDir,
     expectedPluginId: candidate.pluginId,
     expectedIntegrity: candidate.expectedIntegrity,
+    ...(candidate.trustedSourceLinkedOfficialInstall
+      ? { trustedSourceLinkedOfficialInstall: true }
+      : {}),
     mode: "install",
   });
   if (!result.ok) {
@@ -436,17 +568,14 @@ async function installCandidate(params: {
       ...params.records,
       [pluginId]: {
         source: "npm",
-        spec: candidate.npmSpec,
+        spec: npmSpec,
         installPath: result.targetDir,
         version: result.version,
         installedAt: new Date().toISOString(),
         ...buildNpmResolutionInstallFields(result.npmResolution),
       },
     },
-    changes: [
-      ...changes,
-      `Installed missing configured plugin "${pluginId}" from ${candidate.npmSpec}.`,
-    ],
+    changes: [...changes, `Installed missing configured plugin "${pluginId}" from ${npmSpec}.`],
     warnings: [],
   };
 }
@@ -460,6 +589,7 @@ export async function repairMissingConfiguredPluginInstalls(params: {
     env: params.env,
     pluginIds: collectConfiguredPluginIds(params.cfg, params.env),
     channelIds: collectConfiguredChannelIds(params.cfg, params.env),
+    blockedPluginIds: collectBlockedPluginIds(params.cfg),
   });
 }
 
@@ -502,6 +632,12 @@ async function repairMissingPluginInstalls(params: {
     env,
   });
   const knownIds = new Set(snapshot.plugins.map((plugin) => plugin.id));
+  const configuredChannelOwnerPluginIds = collectEffectiveConfiguredChannelOwnerPluginIds({
+    cfg: params.cfg,
+    env,
+    snapshot,
+    configuredChannelIds: params.channelIds,
+  });
   const bundledPluginsById = new Map(
     snapshot.plugins
       .filter((plugin) => plugin.origin === "bundled")
@@ -541,6 +677,7 @@ async function repairMissingPluginInstalls(params: {
       env,
       configuredPluginIds: params.pluginIds,
       configuredChannelIds: params.channelIds,
+      configuredChannelOwnerPluginIds,
       blockedPluginIds: params.blockedPluginIds,
     });
     for (const pluginId of updateDeferredPluginIds) {
@@ -614,6 +751,7 @@ async function repairMissingPluginInstalls(params: {
     missingPluginIds,
     configuredPluginIds: params.pluginIds,
     configuredChannelIds: params.channelIds,
+    configuredChannelOwnerPluginIds,
     blockedPluginIds:
       deferredPluginIds.size > 0
         ? new Set([...(params.blockedPluginIds ?? []), ...deferredPluginIds])
@@ -644,4 +782,5 @@ export const __testing = {
   collectConfiguredChannelIds,
   collectConfiguredPluginIds,
   collectDownloadableInstallCandidates,
+  resolveVersionAlignedOfficialNpmSpec,
 };

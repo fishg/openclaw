@@ -46,17 +46,22 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   recreate the tag and prerelease at the fixed commit so npm prerelease versions
   stay contiguous. If a published beta needs a fix, commit the fix on the
   release branch and increment to the next `-beta.N`.
-- For a beta release train, run the fast local preflight first, publish the
-  beta to npm `beta`, then run the expensive published-package roster focused
-  on install/update/Docker/Parallels/NPM Telegram. If anything fails, fix it on
-  the release branch, commit/push/pull, increment beta number, and repeat. Run
-  the full expensive roster at least once before stable/latest promotion; for
-  later beta attempts, rerun only lanes whose evidence changed unless the fix
-  touches broad release, install/update, plugin, Docker, Parallels, or live QA
-  behavior. After each beta is published, scan current `main` once for critical
-  fixes that landed after the release branch cut and backport only important
-  low-risk fixes. Operators may authorize up to 4 autonomous beta attempts;
-  after 4 failed beta attempts, stop and report.
+- For a beta release train, run the fast local preflight first, then publish all
+  beta artifacts for the same version: core `openclaw` npm to dist-tag `beta`,
+  all publishable `@openclaw/*` plugin npm packages to dist-tag `beta`, and all
+  publishable plugins to ClawHub. A beta is not considered live or complete
+  until core npm, plugin npm, and plugin ClawHub publishes are all done and
+  verified for the exact same `YYYY.M.D-beta.N` version. Then run the expensive
+  published-package roster focused on install/update/Docker/Parallels/NPM
+  Telegram. If anything fails, fix it on the release branch, commit/push/pull,
+  increment beta number, and repeat. Run the full expensive roster at least once
+  before stable/latest promotion; for later beta attempts, rerun only lanes
+  whose evidence changed unless the fix touches broad release, install/update,
+  plugin, Docker, Parallels, or live QA behavior. After each complete beta is
+  published, scan current `main` once for critical fixes that landed after the
+  release branch cut and backport only important low-risk fixes. Operators may
+  authorize up to 4 autonomous beta attempts; after 4 failed beta attempts, stop
+  and report.
 - Use `/changelog` before version/tag preparation so the top changelog section
   is deduped and ordered by user impact.
 - Do not create beta-specific `CHANGELOG.md` headings. Beta releases use the
@@ -75,6 +80,8 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
 - Prefer `-beta.N`; do not mint new `-1` or `-2` beta suffixes
 - `dev`: moving head on `main`
 - When using a beta Git tag, publish npm with the matching beta version suffix so the plain version is not consumed or blocked
+- When using a beta Git tag, publish all publishable plugins to npm and ClawHub
+  with that same beta version. Do not stop after the core `openclaw` package.
 
 ## Handle versions and release files consistently
 
@@ -490,6 +497,11 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
   does not support trusted publishing for `npm dist-tag add`.
 - `@openclaw/*` plugin publishes use a separate maintainer-only flow.
 - Only publish plugins that already exist on npm; bundled disk-tree-only plugins stay unpublished.
+- Beta releases must run the plugin npm and plugin ClawHub flows as part of the
+  release, not as optional follow-up work. If plugin npm or ClawHub publish
+  fails after core npm is live, fix forward by incrementing to the next beta
+  version and publish core plus plugins again; never call the prior beta done
+  while plugin registries still point at an older beta.
 
 ## Fallback local mac publish
 
@@ -576,7 +588,22 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
 21. Wait for `npm-release` approval from `@openclaw/openclaw-release-managers`.
 22. Run postpublish verification:
     `node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>`.
-23. Run the post-published beta verification roster. First scan current `main`
+23. For beta releases, immediately publish all publishable plugins for the same
+    version:
+    - Dispatch `.github/workflows/plugin-npm-release.yml` from the release branch
+      for all publishable plugins and npm dist-tag `beta`.
+    - Dispatch `.github/workflows/plugin-clawhub-release.yml` from the release
+      branch for all publishable plugins.
+    - If either workflow reports failure after a publish step, verify npm and
+      ClawHub directly before deciding whether it is a real publish failure or a
+      registry-propagation/postpublish-check failure.
+24. Before calling a beta live, verify registry state directly:
+    - `openclaw` npm `dist-tags.beta` points at `<beta-version>`.
+    - every publishable `@openclaw/*` plugin npm package has `<beta-version>`
+      and `dist-tags.beta` points at it.
+    - every publishable ClawHub plugin has `<beta-version>`.
+      If any plugin registry still points at an older beta, the beta is incomplete.
+25. Run the post-published beta verification roster. First scan current `main`
     for critical fixes that landed after the release branch cut; backport only
     important low-risk fixes before starting expensive lanes, or increment to
     the next beta if the fix must change the already-published package. If any
@@ -590,11 +617,11 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     If a pre-npm lane fails before any tag/package leaves the machine, fix and
     rerun the same intended beta attempt. Repeat up to the operator's
     authorized beta-attempt limit, normally 4.
-24. Announce the beta/stable release on Discord best-effort using Peter's bot
+26. Announce the beta/stable release on Discord best-effort using Peter's bot
     token from `.profile`.
-25. If the operator requested beta only, stop after beta verification and the
+27. If the operator requested beta only, stop after beta verification and the
     announcement.
-26. If the stable release was published to `beta`, use the light stable
+28. If the stable release was published to `beta`, use the light stable
     promotion roster when the matching beta already carried the full confidence
     pass: published npm postpublish verify, Docker install/update smoke,
     macOS-only Parallels install/update smoke, and required QA signal.
@@ -602,24 +629,24 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     `openclaw/releases-private/.github/workflows/openclaw-npm-dist-tags.yml`
     workflow to promote that stable version from `beta` to `latest`, then
     verify `latest` now points at that version.
-27. If the stable release was published directly to `latest` and `beta` should
+29. If the stable release was published directly to `latest` and `beta` should
     follow it, start that same private dist-tag workflow to point `beta` at the
     stable version, then verify both `latest` and `beta` point at that version.
-28. For stable releases, start
+30. For stable releases, start
     `openclaw/releases-private/.github/workflows/openclaw-macos-publish.yml`
     for the real publish with the successful private mac `preflight_run_id` and
     wait for success.
-29. Verify the successful real private mac run uploaded the `.zip`, `.dmg`,
+31. Verify the successful real private mac run uploaded the `.zip`, `.dmg`,
     and `.dSYM.zip` artifacts to the existing GitHub release in
     `openclaw/openclaw`.
-30. For stable releases, download `macos-appcast-<tag>` from the successful
+32. For stable releases, download `macos-appcast-<tag>` from the successful
     private mac run, update `appcast.xml` on `main`, and verify the feed. Merge
     or cherry-pick release branch changes back to `main` after stable succeeds.
-31. For beta releases, publish the mac assets only when intentionally requested;
+33. For beta releases, publish the mac assets only when intentionally requested;
     expect no shared production
     `appcast.xml` artifact and do not update the shared production feed unless a
     separate beta feed exists.
-32. After publish, verify npm and the attached release artifacts.
+34. After publish, verify npm and the attached release artifacts.
 
 ## GHSA advisory work
 

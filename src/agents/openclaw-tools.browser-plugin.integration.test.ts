@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import { resetConfigRuntimeState, setRuntimeConfigSnapshot } from "../config/config.js";
 import { activateSecretsRuntimeSnapshot, clearSecretsRuntimeSnapshot } from "../secrets/runtime.js";
-import { __testing, resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
+import { resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
 
 const hoisted = vi.hoisted(() => ({
   resolvePluginTools: vi.fn(),
@@ -15,7 +16,7 @@ describe("createOpenClawTools browser plugin integration", () => {
   afterEach(() => {
     hoisted.resolvePluginTools.mockReset();
     clearSecretsRuntimeSnapshot();
-    __testing.clearPluginToolsCache();
+    resetConfigRuntimeState();
   });
 
   it("keeps the browser tool returned by plugin resolution", () => {
@@ -194,6 +195,48 @@ describe("createOpenClawTools browser plugin integration", () => {
     expect(capturedRuntimeConfig).toBe(resolvedRunConfig);
   });
 
+  it("does not let a source-less pinned config snapshot override explicit plugin tool config", () => {
+    const pinnedRuntimeConfig = {
+      plugins: {
+        allow: ["old-plugin"],
+      },
+    } as OpenClawConfig;
+    const explicitConfig = {
+      plugins: {
+        allow: ["browser"],
+      },
+      tools: {
+        experimental: {
+          planTool: true,
+        },
+      },
+    } as OpenClawConfig;
+    let capturedRuntimeConfig: OpenClawConfig | undefined;
+    let getRuntimeConfig: (() => OpenClawConfig | undefined) | undefined;
+    hoisted.resolvePluginTools.mockImplementation((params: unknown) => {
+      const context = (
+        params as {
+          context?: {
+            runtimeConfig?: OpenClawConfig;
+            getRuntimeConfig?: () => OpenClawConfig | undefined;
+          };
+        }
+      ).context;
+      capturedRuntimeConfig = context?.runtimeConfig;
+      getRuntimeConfig = context?.getRuntimeConfig;
+      return [];
+    });
+    setRuntimeConfigSnapshot(pinnedRuntimeConfig);
+
+    resolveOpenClawPluginToolsForOptions({
+      options: { config: explicitConfig },
+      resolvedConfig: explicitConfig,
+    });
+
+    expect(capturedRuntimeConfig).toBe(explicitConfig);
+    expect(getRuntimeConfig?.()).toBe(explicitConfig);
+  });
+
   it("exposes a live runtime config getter to plugin tool factories", () => {
     const sourceConfig = {
       plugins: {
@@ -219,23 +262,7 @@ describe("createOpenClawTools browser plugin integration", () => {
       ).context?.getRuntimeConfig;
       return [];
     });
-    activateSecretsRuntimeSnapshot({
-      sourceConfig,
-      config: firstRuntimeConfig,
-      authStores: [],
-      warnings: [],
-      webTools: {
-        search: {
-          providerSource: "none",
-          diagnostics: [],
-        },
-        fetch: {
-          providerSource: "none",
-          diagnostics: [],
-        },
-        diagnostics: [],
-      },
-    });
+    setRuntimeConfigSnapshot(firstRuntimeConfig, sourceConfig);
 
     resolveOpenClawPluginToolsForOptions({
       options: { config: sourceConfig },
@@ -244,71 +271,9 @@ describe("createOpenClawTools browser plugin integration", () => {
 
     expect(getRuntimeConfig?.()).toStrictEqual(firstRuntimeConfig);
 
-    activateSecretsRuntimeSnapshot({
-      sourceConfig,
-      config: nextRuntimeConfig,
-      authStores: [],
-      warnings: [],
-      webTools: {
-        search: {
-          providerSource: "none",
-          diagnostics: [],
-        },
-        fetch: {
-          providerSource: "none",
-          diagnostics: [],
-        },
-        diagnostics: [],
-      },
-    });
+    setRuntimeConfigSnapshot(nextRuntimeConfig, sourceConfig);
 
     expect(getRuntimeConfig?.()).toStrictEqual(nextRuntimeConfig);
     expect(getRuntimeConfig?.()?.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
-  });
-
-  it("reuses cached plugin tools for the same session context", () => {
-    hoisted.resolvePluginTools.mockReturnValue([
-      {
-        name: "browser",
-        description: "browser fixture tool",
-        parameters: {
-          type: "object",
-          properties: {},
-        },
-        async execute() {
-          return {
-            content: [{ type: "text", text: "ok" }],
-          };
-        },
-      },
-    ]);
-
-    const config = {
-      plugins: {
-        allow: ["browser"],
-      },
-    } as OpenClawConfig;
-
-    const first = resolveOpenClawPluginToolsForOptions({
-      options: {
-        config,
-        agentSessionKey: "agent:main:telegram:main:direct:706271968",
-        agentChannel: "telegram",
-        agentTo: "706271968",
-      },
-      resolvedConfig: config,
-    });
-    const second = resolveOpenClawPluginToolsForOptions({
-      options: {
-        config,
-        agentSessionKey: "agent:main:telegram:main:direct:706271968",
-        agentChannel: "telegram",
-        agentTo: "706271968",
-      },
-      resolvedConfig: config,
-    });
-
-    expect(first).toBe(second);
-    expect(hoisted.resolvePluginTools).toHaveBeenCalledTimes(1);
   });
 });

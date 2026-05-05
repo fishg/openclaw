@@ -3,6 +3,7 @@ import type { BaseProbeResult } from "openclaw/plugin-sdk/channel-contract";
 import type { TelegramNetworkConfig } from "openclaw/plugin-sdk/config-types";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { fetchWithTimeout } from "openclaw/plugin-sdk/text-runtime";
+import type { TelegramBotInfo } from "./bot-info.js";
 import { resolveTelegramApiBase, resolveTelegramFetch } from "./fetch.js";
 import { makeProxyFetch } from "./proxy.js";
 
@@ -11,11 +12,19 @@ export type TelegramProbe = BaseProbeResult & {
   elapsedMs: number;
   bot?: {
     id?: number | null;
+    isBot?: boolean | null;
+    firstName?: string | null;
     username?: string | null;
     canJoinGroups?: boolean | null;
     canReadAllGroupMessages?: boolean | null;
+    canManageBots?: boolean | null;
     supportsInlineQueries?: boolean | null;
+    canConnectToBusiness?: boolean | null;
+    hasMainWebApp?: boolean | null;
+    hasTopicsEnabled?: boolean | null;
+    allowsUsersToCreateTopics?: boolean | null;
   };
+  botInfo?: TelegramBotInfo;
   webhook?: { url?: string | null; hasCustomCert?: boolean | null };
 };
 
@@ -242,6 +251,41 @@ function resolveProbeFetcher(token: string, options?: TelegramProbeOptions): typ
   return resolved;
 }
 
+function normalizeBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeTelegramBotInfo(value: unknown): TelegramBotInfo | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const bot = value as Record<string, unknown>;
+  if (
+    typeof bot.id !== "number" ||
+    bot.is_bot !== true ||
+    typeof bot.first_name !== "string" ||
+    typeof bot.username !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    id: bot.id,
+    is_bot: true,
+    first_name: bot.first_name,
+    username: bot.username,
+    ...(typeof bot.last_name === "string" ? { last_name: bot.last_name } : {}),
+    ...(typeof bot.language_code === "string" ? { language_code: bot.language_code } : {}),
+    can_join_groups: normalizeBoolean(bot.can_join_groups) ?? false,
+    can_read_all_group_messages: normalizeBoolean(bot.can_read_all_group_messages) ?? false,
+    can_manage_bots: normalizeBoolean(bot.can_manage_bots) ?? false,
+    supports_inline_queries: normalizeBoolean(bot.supports_inline_queries) ?? false,
+    can_connect_to_business: normalizeBoolean(bot.can_connect_to_business) ?? false,
+    has_main_web_app: normalizeBoolean(bot.has_main_web_app) ?? false,
+    has_topics_enabled: normalizeBoolean(bot.has_topics_enabled) ?? false,
+    allows_users_to_create_topics: normalizeBoolean(bot.allows_users_to_create_topics) ?? false,
+  };
+}
+
 export async function probeTelegram(
   token: string,
   timeoutMs: number,
@@ -323,13 +367,7 @@ export async function probeTelegram(
     const meJson = (await meRes.json()) as {
       ok?: boolean;
       description?: string;
-      result?: {
-        id?: number;
-        username?: string;
-        can_join_groups?: boolean;
-        can_read_all_group_messages?: boolean;
-        supports_inline_queries?: boolean;
-      };
+      result?: unknown;
     };
     if (!meRes.ok || !meJson?.ok) {
       result.status = meRes.status;
@@ -337,8 +375,27 @@ export async function probeTelegram(
       return { ...result, elapsedMs: Date.now() - started };
     }
 
-    const botInfo = meJson.result as UserFromGetMe;
-    result.bot = mapBotInfoToProbeBot(botInfo);
+    const rawBotInfo = meJson.result as UserFromGetMe;
+    const normalizedBotInfo = normalizeTelegramBotInfo(meJson.result);
+    const rawBot = meJson.result && typeof meJson.result === "object" ? meJson.result : {};
+    const bot = rawBot as Record<string, unknown>;
+    if (normalizedBotInfo) {
+      result.botInfo = normalizedBotInfo;
+    }
+    result.bot = {
+      id: typeof bot.id === "number" ? bot.id : null,
+      isBot: normalizeBoolean(bot.is_bot),
+      firstName: typeof bot.first_name === "string" ? bot.first_name : null,
+      username: typeof bot.username === "string" ? bot.username : null,
+      canJoinGroups: normalizeBoolean(bot.can_join_groups),
+      canReadAllGroupMessages: normalizeBoolean(bot.can_read_all_group_messages),
+      canManageBots: normalizeBoolean(bot.can_manage_bots),
+      supportsInlineQueries: normalizeBoolean(bot.supports_inline_queries),
+      canConnectToBusiness: normalizeBoolean(bot.can_connect_to_business),
+      hasMainWebApp: normalizeBoolean(bot.has_main_web_app),
+      hasTopicsEnabled: normalizeBoolean(bot.has_topics_enabled),
+      allowsUsersToCreateTopics: normalizeBoolean(bot.allows_users_to_create_topics),
+    };
 
     const webhook = includeWebhookInfo
       ? await fetchTelegramWebhookInfo({
@@ -357,7 +414,7 @@ export async function probeTelegram(
     result.error = null;
     result.elapsedMs = Date.now() - started;
     writeCachedProbeSuccessEntry(token, options, {
-      botInfo,
+      botInfo: rawBotInfo,
       ...(webhook ? { webhook } : {}),
     });
     return result;

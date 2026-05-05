@@ -160,6 +160,8 @@ export type TelegramAccountConfig = {
    * restore the previous uncached behavior.
    */
   getMeCacheMode?: TelegramGetMeCacheMode;
+  /** Buffer window for Telegram media groups/albums before dispatching them as one inbound message. Default: 500ms. */
+  mediaGroupFlushMs?: number;
   /** Telegram polling watchdog threshold in milliseconds. Default: 120000. */
   pollingStallThresholdMs?: number;
   /** Retry policy for outbound Telegram API calls. */

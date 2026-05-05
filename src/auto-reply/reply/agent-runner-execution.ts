@@ -998,6 +998,31 @@ export async function runAgentTurnWithFallback(params: {
       logVerbose(`compaction ${phase} notice delivery failed (non-fatal): ${String(err)}`);
     }
   };
+  const readCompactionHookMessages = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  };
+  const sendCompactionHookMessages = async (messages: string[]) => {
+    if (!params.opts?.onBlockReply || messages.length === 0) {
+      return;
+    }
+    const noticePayload = params.applyReplyToMode({
+      text: messages.join("\n\n"),
+      replyToId: currentMessageId,
+      replyToCurrent: true,
+      isCompactionNotice: true,
+    });
+    try {
+      await params.opts.onBlockReply(noticePayload);
+    } catch (err) {
+      logVerbose(`compaction hook notice delivery failed (non-fatal): ${String(err)}`);
+    }
+  };
   const shouldSurfaceToControlUi = isInternalMessageChannel(
     params.followupRun.run.messageProvider ??
       params.sessionCtx.Surface ??
@@ -1455,6 +1480,7 @@ export async function runAgentTurnWithFallback(params: {
                 sandboxSessionKey: params.runtimePolicySessionKey,
                 prompt: params.commandBody,
                 transcriptPrompt: params.transcriptCommandBody,
+                currentTurnContext: params.followupRun.currentTurnContext,
                 extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
                 sourceReplyDeliveryMode: params.followupRun.run.sourceReplyDeliveryMode,
                 forceMessageTool:
@@ -1472,6 +1498,8 @@ export async function runAgentTurnWithFallback(params: {
                 })(),
                 suppressToolErrorWarnings: params.opts?.suppressToolErrorWarnings,
                 disableTools: params.opts?.disableTools,
+                enableHeartbeatTool: params.opts?.enableHeartbeatTool,
+                forceHeartbeatTool: params.opts?.forceHeartbeatTool,
                 bootstrapContextMode: params.opts?.bootstrapContextMode,
                 bootstrapContextRunKind: params.opts?.isHeartbeat ? "heartbeat" : "default",
                 images: params.opts?.images,
@@ -1531,7 +1559,14 @@ export async function runAgentTurnWithFallback(params: {
                     const name = readStringValue(evt.data.name);
                     if (phase === "start" || phase === "update") {
                       await params.typingSignals.signalToolStart();
-                      await params.opts?.onToolStart?.({ name, phase });
+                      await params.opts?.onToolStart?.({
+                        name,
+                        phase,
+                        args:
+                          evt.data.args && typeof evt.data.args === "object"
+                            ? (evt.data.args as Record<string, unknown>)
+                            : undefined,
+                      });
                     }
                   }
                   if (evt.stream === "item") {
@@ -1544,6 +1579,7 @@ export async function runAgentTurnWithFallback(params: {
                       status: readStringValue(evt.data.status),
                       summary: readStringValue(evt.data.summary),
                       progressText: readStringValue(evt.data.progressText),
+                      meta: readStringValue(evt.data.meta),
                       approvalId: readStringValue(evt.data.approvalId),
                       approvalSlug: readStringValue(evt.data.approvalSlug),
                     });
@@ -1622,12 +1658,19 @@ export async function runAgentTurnWithFallback(params: {
                   // Track auto-compaction and notify higher layers.
                   if (evt.stream === "compaction") {
                     const phase = readStringValue(evt.data.phase) ?? "";
+                    const hookMessages = readCompactionHookMessages(evt.data.messages);
                     if (phase === "start") {
                       // Keep custom compaction callbacks active, but gate the
                       // fallback user-facing notice behind explicit opt-in.
                       if (params.opts?.onCompactionStart) {
                         await params.opts.onCompactionStart();
-                      } else if (shouldNotifyUserAboutCompaction) {
+                      }
+                      if (hookMessages.length > 0) {
+                        await sendCompactionHookMessages(hookMessages);
+                      } else if (
+                        !params.opts?.onCompactionStart &&
+                        shouldNotifyUserAboutCompaction
+                      ) {
                         // Send directly via opts.onBlockReply (bypassing the
                         // pipeline) so the notice does not cause final payloads
                         // to be discarded on non-streaming model paths.
@@ -1640,9 +1683,17 @@ export async function runAgentTurnWithFallback(params: {
                         attemptCompactionCount += 1;
                         if (params.opts?.onCompactionEnd) {
                           await params.opts.onCompactionEnd();
-                        } else if (shouldNotifyUserAboutCompaction) {
+                        }
+                        if (hookMessages.length > 0) {
+                          await sendCompactionHookMessages(hookMessages);
+                        } else if (
+                          !params.opts?.onCompactionEnd &&
+                          shouldNotifyUserAboutCompaction
+                        ) {
                           await sendCompactionNotice("end");
                         }
+                      } else if (hookMessages.length > 0) {
+                        await sendCompactionHookMessages(hookMessages);
                       } else if (shouldNotifyUserAboutCompaction) {
                         await sendCompactionNotice("incomplete");
                       }

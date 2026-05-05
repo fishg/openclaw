@@ -359,11 +359,14 @@ export function createTelegramBotCore(
       getMeCacheMode: telegramCfg.getMeCacheMode,
     },
   });
-
-  const bot = new botRuntime.Bot(opts.token, {
-    ...(client ? { client } : {}),
-    ...(cachedBotInfo ? { botInfo: cachedBotInfo } : {}),
-  });
+  const botConfig =
+    client || opts.botInfo || cachedBotInfo
+      ? {
+          ...(client ? { client } : {}),
+          ...((opts.botInfo ?? cachedBotInfo) ? { botInfo: opts.botInfo ?? cachedBotInfo } : {}),
+        }
+      : undefined;
+  const bot = new botRuntime.Bot(opts.token, botConfig);
   bot.api.config.use(botRuntime.apiThrottler());
   // Catch all errors from bot middleware to prevent unhandled rejections
   bot.catch((err) => {
