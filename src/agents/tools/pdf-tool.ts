@@ -335,8 +335,9 @@ export function createPdfTool(options?: {
   const policyMs = Date.now() - policyStartedAt;
   const totalMs = Date.now() - startedAt;
   if (totalMs >= PDF_TOOL_FACTORY_TRACE_WARN_MS) {
+    const tracedPdfModelConfig = registrationPdfModelConfig;
     log.warn(
-      `[trace:pdf-tool] factory totalMs=${totalMs} modelConfigMs=${modelConfigMs} defaultsMs=${defaultsMs} policyMs=${policyMs} primary=${pdfModelConfig.primary ?? "null"} fallbackCount=${pdfModelConfig.fallbacks?.length ?? 0} workspaceDir=${options?.workspaceDir ? "set" : "unset"} authStore=${options?.authProfileStore ? "provided" : "missing"}`,
+      `[trace:pdf-tool] factory totalMs=${totalMs} modelConfigMs=${modelConfigMs} defaultsMs=${defaultsMs} policyMs=${policyMs} primary=${tracedPdfModelConfig?.primary ?? "null"} fallbackCount=${tracedPdfModelConfig?.fallbacks?.length ?? 0} workspaceDir=${options?.workspaceDir ? "set" : "unset"} authStore=${options?.authProfileStore ? "provided" : "missing"}`,
     );
   }
 

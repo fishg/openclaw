@@ -271,7 +271,6 @@ export const TelegramAccountSchemaBase = z
       .describe(
         "Buffer window in milliseconds for Telegram media groups/albums before dispatching them as one inbound message. Default: 500.",
       ),
-    getMeCacheMode: z.enum(["success-24h", "legacy"]).optional(),
     pollingStallThresholdMs: z.number().int().min(30_000).max(600_000).optional(),
     retry: RetryConfigSchema,
     network: z
