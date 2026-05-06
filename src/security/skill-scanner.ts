@@ -236,11 +236,102 @@ function isBenignMemberExecMatch(line: string, match: RegExpExecArray): boolean 
   return !/\b(?:cp|childProcess|child_process)\s*\.\s*exec\s*\(/.test(line);
 }
 
-function stripFullLineCommentsForHeuristics(source: string): string {
-  return source
-    .split("\n")
-    .map((line) => (line.trimStart().startsWith("//") ? "" : line))
-    .join("\n");
+function stripCommentsForHeuristics(source: string): string {
+  let stripped = "";
+  let quote: "'" | '"' | "`" | null = null;
+  let escaped = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i] ?? "";
+    const next = source[i + 1] ?? "";
+
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i++;
+        continue;
+      }
+      if (ch === "\n") {
+        stripped += "\n";
+      }
+      continue;
+    }
+
+    if (quote) {
+      stripped += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === "`") {
+      quote = ch;
+      stripped += ch;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") {
+        i++;
+      }
+      if (source[i] === "\n") {
+        stripped += "\n";
+      }
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+
+    stripped += ch;
+  }
+
+  return stripped;
+}
+
+function findSourceRuleMatch(params: {
+  rule: SourceRule;
+  source: string;
+  lines: string[];
+}): { line: number; evidence: string } | null {
+  if (!params.rule.pattern.test(params.source)) {
+    return null;
+  }
+  if (params.rule.requiresContext && !params.rule.requiresContext.test(params.source)) {
+    return null;
+  }
+
+  for (let i = 0; i < params.lines.length; i++) {
+    if (!params.rule.pattern.test(params.lines[i] ?? "")) {
+      continue;
+    }
+
+    if (params.rule.requiresContext && params.rule.requiresContextWindowLines !== undefined) {
+      const start = Math.max(0, i - params.rule.requiresContextWindowLines);
+      const end = Math.min(params.lines.length, i + params.rule.requiresContextWindowLines + 1);
+      const windowSource = params.lines.slice(start, end).join("\n");
+      if (!params.rule.requiresContext.test(windowSource)) {
+        continue;
+      }
+    }
+
+    return { line: i + 1, evidence: params.lines[i] ?? "" };
+  }
+
+  if (params.rule.requiresContextWindowLines !== undefined) {
+    return null;
+  }
+
+  return { line: 1, evidence: params.source.slice(0, 120) };
 }
 
 function findSourceRuleMatch(params: {
@@ -282,7 +373,7 @@ function findSourceRuleMatch(params: {
 export function scanSource(source: string, filePath: string): SkillScanFinding[] {
   const findings: SkillScanFinding[] = [];
   const lines = source.split("\n");
-  const heuristicSource = stripFullLineCommentsForHeuristics(source);
+  const heuristicSource = stripCommentsForHeuristics(source);
   const heuristicLines = heuristicSource.split("\n");
   const matchedLineRules = new Set<string>();
 

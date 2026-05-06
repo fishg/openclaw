@@ -168,7 +168,9 @@ worktrees, runs `discord-status-reactions-tool-only` against each worktree, and
 uploads `baseline/`, `candidate/`, `comparison.json`, and `mantis-report.md` as
 Actions artifacts. It also renders each lane's timeline HTML in a Crabbox
 desktop browser and publishes those VNC screenshots beside the deterministic
-timeline PNGs in the PR comment.
+timeline PNGs in the PR comment. The workflow builds the Crabbox CLI from
+`openclaw/crabbox` main so it can use the current desktop/browser lease flags
+before the next Crabbox binary release is cut.
 
 You can also trigger the status-reactions run directly from a PR comment:
 
@@ -415,9 +417,15 @@ Recommended secret names:
 - `OPENCLAW_QA_REDACT_PUBLIC_METADATA=1` for public GitHub artifact uploads
 - `OPENCLAW_QA_CONVEX_SITE_URL`
 - `OPENCLAW_QA_CONVEX_SECRET_CI`
+- `OPENCLAW_QA_MANTIS_CRABBOX_COORDINATOR`
+- `OPENCLAW_QA_MANTIS_CRABBOX_COORDINATOR_TOKEN`
 
 Long term, the Convex credential pool should remain the normal source for live
 transport credentials. GitHub secrets bootstrap the broker and fallback lanes.
+The Discord status-reactions workflow maps the Mantis Crabbox secrets back to
+the `CRABBOX_COORDINATOR` and `CRABBOX_COORDINATOR_TOKEN` environment variables
+that the Crabbox CLI expects. The plain `CRABBOX_*` GitHub secret names remain
+accepted as a compatibility fallback.
 
 The Mantis runner must never print:
 

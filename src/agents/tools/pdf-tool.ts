@@ -130,6 +130,7 @@ type PdfSandboxConfig = {
 async function runPdfPrompt(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
+  workspaceDir?: string;
   pdfModelConfig: ImageModelConfig;
   modelOverride?: string;
   prompt: string;
@@ -145,8 +146,9 @@ async function runPdfPrompt(params: {
 }> {
   const effectiveCfg = applyImageModelConfigDefaults(params.cfg, params.pdfModelConfig);
 
+  const modelsOptions = params.workspaceDir ? { workspaceDir: params.workspaceDir } : undefined;
   const prepStartedAt = Date.now();
-  await ensureOpenClawModelsJson(effectiveCfg, params.agentDir);
+  await ensureOpenClawModelsJson(effectiveCfg, params.agentDir, modelsOptions);
   const ensuredModelsJsonMs = Date.now() - prepStartedAt;
   const authStorageStartedAt = Date.now();
   const authStorage = discoverAuthStorage(params.agentDir);
@@ -518,6 +520,7 @@ export function createPdfTool(options?: {
       const result = await runPdfPrompt({
         cfg: options?.config,
         agentDir,
+        ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
         pdfModelConfig,
         modelOverride,
         prompt: promptRaw,

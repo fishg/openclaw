@@ -59,6 +59,7 @@ import {
 } from "../../utils/message-channel.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
+import { markReplyPayloadForSourceSuppressionDelivery } from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
 import {
@@ -300,6 +301,10 @@ function rollbackFallbackSelectionStateIfUnchanged(
  * Includes a countdown when the soonest cooldown expiry is known.
  */
 function buildRateLimitCooldownMessage(err: unknown): string {
+  const codexUsageLimitMessage = extractCodexUsageLimitErrorMessage(err);
+  if (codexUsageLimitMessage) {
+    return codexUsageLimitMessage;
+  }
   if (!isFallbackSummaryError(err)) {
     return "⚠️ All models are temporarily rate-limited. Please try again in a few minutes.";
   }
@@ -314,6 +319,44 @@ function buildRateLimitCooldownMessage(err: unknown): string {
     return `⚠️ Rate-limited — ready in ~${minsLeft} min. Please try again shortly.`;
   }
   return "⚠️ All models are temporarily rate-limited. Please try again in a few minutes.";
+}
+
+function extractCodexUsageLimitErrorMessage(err: unknown): string | undefined {
+  if (isFallbackSummaryError(err)) {
+    for (const attempt of err.attempts) {
+      const message = extractCodexUsageLimitMessage(attempt.error);
+      if (message) {
+        return `⚠️ ${message}`;
+      }
+    }
+    return undefined;
+  }
+  const message = extractCodexUsageLimitMessage(formatErrorMessage(err));
+  return message ? `⚠️ ${message}` : undefined;
+}
+
+function extractCodexUsageLimitMessage(text: string): string | undefined {
+  const markers = [
+    "You've reached your Codex subscription usage limit.",
+    "Codex usage limit reached.",
+  ];
+  const markerIndex = markers
+    .map((marker) => text.indexOf(marker))
+    .filter((index) => index >= 0)
+    .toSorted((left, right) => left - right)[0];
+  if (markerIndex === undefined) {
+    return undefined;
+  }
+  const message = sanitizeUserFacingText(text.slice(markerIndex), { errorContext: true })
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (!message) {
+    return undefined;
+  }
+  return message.length > 500 ? `${message.slice(0, 497)}...` : message;
 }
 
 function isPureTransientRateLimitSummary(err: unknown): boolean {
@@ -488,6 +531,74 @@ function buildExternalRunFailureReply(
       : GENERIC_EXTERNAL_RUN_FAILURE_TEXT,
     isGenericRunnerFailure: true,
   };
+}
+
+function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T {
+  return markReplyPayloadForSourceSuppressionDelivery(payload);
+}
+
+export function buildKnownAgentRunFailureReplyPayload(params: {
+  err: unknown;
+  sessionCtx: TemplateContext;
+  resolvedVerboseLevel: VerboseLevel | undefined;
+}): ReplyPayload | undefined {
+  const message = formatErrorMessage(params.err);
+  const isFallbackSummary = isFallbackSummaryError(params.err);
+  const isBilling = isFallbackSummary
+    ? isPureBillingSummary(params.err)
+    : isBillingErrorMessage(message);
+  if (isBilling) {
+    return markAgentRunFailureReplyPayload({
+      text: resolveExternalRunFailureTextForConversation({
+        text: BILLING_ERROR_USER_MESSAGE,
+        sessionCtx: params.sessionCtx,
+        isGenericRunnerFailure: false,
+      }),
+    });
+  }
+
+  const isPureTransientSummary = isFallbackSummary
+    ? isPureTransientRateLimitSummary(params.err)
+    : false;
+  const isRateLimit = isFallbackSummary ? isPureTransientSummary : isRateLimitErrorMessage(message);
+  const rateLimitOrOverloadedCopy =
+    !isFallbackSummary || isPureTransientSummary
+      ? formatRateLimitOrOverloadedErrorCopy(message)
+      : undefined;
+
+  if (isRateLimit && !isOverloadedErrorMessage(message)) {
+    return markAgentRunFailureReplyPayload({
+      text: resolveExternalRunFailureTextForConversation({
+        text: buildRateLimitCooldownMessage(params.err),
+        sessionCtx: params.sessionCtx,
+        isGenericRunnerFailure: false,
+      }),
+    });
+  }
+
+  if (rateLimitOrOverloadedCopy) {
+    return markAgentRunFailureReplyPayload({
+      text: resolveExternalRunFailureTextForConversation({
+        text: rateLimitOrOverloadedCopy,
+        sessionCtx: params.sessionCtx,
+        isGenericRunnerFailure: false,
+      }),
+    });
+  }
+
+  const externalRunFailureReply = buildExternalRunFailureReply(message, {
+    includeDetails: isVerboseFailureDetailEnabled(params.resolvedVerboseLevel),
+  });
+  if (externalRunFailureReply.isGenericRunnerFailure) {
+    return undefined;
+  }
+  return markAgentRunFailureReplyPayload({
+    text: resolveExternalRunFailureTextForConversation({
+      text: externalRunFailureReply.text,
+      sessionCtx: params.sessionCtx,
+      isGenericRunnerFailure: false,
+    }),
+  });
 }
 
 const CONTEXT_OVERFLOW_RESET_HINT =
@@ -930,6 +1041,7 @@ export async function runAgentTurnWithFallback(params: {
   activeSessionStore?: Record<string, SessionEntry>;
   storePath?: string;
   resolvedVerboseLevel: VerboseLevel;
+  toolProgressDetail?: "explain" | "raw";
   replyMediaContext?: ReplyMediaContext;
 }): Promise<AgentRunLoopResult> {
   const TRANSIENT_HTTP_RETRY_DELAY_MS = 2_500;
@@ -1496,6 +1608,7 @@ export async function runAgentTurnWithFallback(params: {
                   }
                   return isMarkdownCapableMessageChannel(channel) ? "markdown" : "plain";
                 })(),
+                toolProgressDetail: params.toolProgressDetail,
                 suppressToolErrorWarnings: params.opts?.suppressToolErrorWarnings,
                 disableTools: params.opts?.disableTools,
                 enableHeartbeatTool: params.opts?.enableHeartbeatTool,
@@ -1538,14 +1651,6 @@ export async function runAgentTurnWithFallback(params: {
                 onReasoningEnd: params.opts?.onReasoningEnd,
                 onAgentEvent: async (evt) => {
                   lifecycleBackstop.note(evt);
-                  if (evt.stream.startsWith("codex_app_server.")) {
-                    emitAgentEvent({
-                      runId,
-                      stream: evt.stream,
-                      data: evt.data,
-                      ...(evt.sessionKey ? { sessionKey: evt.sessionKey } : {}),
-                    });
-                  }
                   // Signal run start only after the embedded agent emits real activity.
                   const hasLifecyclePhase =
                     evt.stream === "lifecycle" && typeof evt.data.phase === "string";
@@ -1566,6 +1671,7 @@ export async function runAgentTurnWithFallback(params: {
                           evt.data.args && typeof evt.data.args === "object"
                             ? (evt.data.args as Record<string, unknown>)
                             : undefined,
+                        detailMode: params.toolProgressDetail,
                       });
                     }
                   }
@@ -1807,7 +1913,7 @@ export async function runAgentTurnWithFallback(params: {
         params.replyOperation?.fail("run_failed", embeddedError);
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: buildContextOverflowRecoveryText({
               cfg: runtimeConfig,
               agentId: params.followupRun.run.agentId,
@@ -1815,7 +1921,7 @@ export async function runAgentTurnWithFallback(params: {
               primaryModel: params.followupRun.run.model,
               activeSessionEntry: params.getActiveSessionEntry(),
             }),
-          },
+          }),
         };
       }
       if (embeddedError?.kind === "role_ordering") {
@@ -1824,9 +1930,9 @@ export async function runAgentTurnWithFallback(params: {
           params.replyOperation?.fail("run_failed", embeddedError);
           return {
             kind: "final",
-            payload: {
+            payload: markAgentRunFailureReplyPayload({
               text: "⚠️ Message ordering conflict. I've reset the conversation - please try again.",
-            },
+            }),
           };
         }
       }
@@ -1856,13 +1962,13 @@ export async function runAgentTurnWithFallback(params: {
           params.replyOperation?.fail("run_failed", err);
           return {
             kind: "final",
-            payload: {
+            payload: markAgentRunFailureReplyPayload({
               text: resolveExternalRunFailureTextForConversation({
                 text: switchErrorText,
                 sessionCtx: params.sessionCtx,
                 isGenericRunnerFailure: !shouldSurfaceToControlUi,
               }),
-            },
+            }),
           };
         }
         params.followupRun.run.provider = err.provider;
@@ -1888,9 +1994,9 @@ export async function runAgentTurnWithFallback(params: {
       if (isReplyOperationRestartAbort(params.replyOperation)) {
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: buildRestartLifecycleReplyText(),
-          },
+          }),
         };
       }
 
@@ -1908,9 +2014,9 @@ export async function runAgentTurnWithFallback(params: {
         params.replyOperation?.fail("gateway_draining", restartLifecycleError);
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: buildRestartLifecycleReplyText(),
-          },
+          }),
         };
       }
 
@@ -1918,9 +2024,9 @@ export async function runAgentTurnWithFallback(params: {
         params.replyOperation?.fail("command_lane_cleared", restartLifecycleError);
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: buildRestartLifecycleReplyText(),
-          },
+          }),
         };
       }
 
@@ -1933,7 +2039,7 @@ export async function runAgentTurnWithFallback(params: {
         params.replyOperation?.fail("run_failed", err);
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: buildContextOverflowRecoveryText({
               duringCompaction: true,
               cfg: runtimeConfig,
@@ -1942,7 +2048,7 @@ export async function runAgentTurnWithFallback(params: {
               primaryModel: params.followupRun.run.model,
               activeSessionEntry: params.getActiveSessionEntry(),
             }),
-          },
+          }),
         };
       }
       if (isRoleOrderingError) {
@@ -1951,9 +2057,9 @@ export async function runAgentTurnWithFallback(params: {
           params.replyOperation?.fail("run_failed", err);
           return {
             kind: "final",
-            payload: {
+            payload: markAgentRunFailureReplyPayload({
               text: "⚠️ Message ordering conflict. I've reset the conversation - please try again.",
-            },
+            }),
           };
         }
       }
@@ -1998,9 +2104,9 @@ export async function runAgentTurnWithFallback(params: {
         params.replyOperation?.fail("session_corruption_reset", err);
         return {
           kind: "final",
-          payload: {
+          payload: markAgentRunFailureReplyPayload({
             text: "⚠️ Session history was corrupted. I've reset the conversation - please try again!",
-          },
+          }),
         };
       }
 
@@ -2081,12 +2187,9 @@ export async function runAgentTurnWithFallback(params: {
       params.replyOperation?.fail("run_failed", err);
       return {
         kind: "final",
-        payload: {
+        payload: markAgentRunFailureReplyPayload({
           text: userVisibleFallbackText,
-          ...(fallbackSummaryFailureText && userVisibleFallbackText !== SILENT_REPLY_TOKEN
-            ? { isError: true }
-            : {}),
-        },
+        }),
       };
     }
   }
@@ -2104,9 +2207,9 @@ export async function runAgentTurnWithFallback(params: {
       params.replyOperation?.fail("run_failed", finalEmbeddedError);
       return {
         kind: "final",
-        payload: {
+        payload: markAgentRunFailureReplyPayload({
           text: "⚠️ Context overflow — this conversation is too large for the model. Use /new to start a fresh session.",
-        },
+        }),
       };
     }
   }
@@ -2141,10 +2244,10 @@ export async function runAgentTurnWithFallback(params: {
         : undefined;
       if (formattedErrorCandidate) {
         runResult.payloads = [
-          {
+          markAgentRunFailureReplyPayload({
             text: formattedErrorCandidate,
             isError: true,
-          },
+          }),
         ];
       }
     }

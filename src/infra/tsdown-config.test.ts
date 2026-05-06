@@ -9,6 +9,7 @@ type TsdownConfigEntry = {
   };
   entry?: Record<string, string> | string[];
   inputOptions?: TsdownInputOptions;
+  outputOptions?: TsdownOutputOptions;
   outDir?: string;
 };
 
@@ -38,6 +39,24 @@ type TsdownExternalFunction = (
   parentId: string | undefined,
   isResolved: boolean,
 ) => boolean | null | undefined;
+
+type TsdownOutputOptions = (
+  options: {
+    entryFileNames?:
+      | string
+      | ((chunkInfo: { facadeModuleId?: string; moduleIds: string[]; name?: string }) => string);
+    chunkFileNames?: string | ((chunkInfo: { moduleIds: string[] }) => string);
+  },
+  format?: unknown,
+  context?: unknown,
+) =>
+  | {
+      entryFileNames?:
+        | string
+        | ((chunkInfo: { facadeModuleId?: string; moduleIds: string[]; name?: string }) => string);
+      chunkFileNames?: string | ((chunkInfo: { moduleIds: string[] }) => string);
+    }
+  | undefined;
 
 function asConfigArray(config: unknown): TsdownConfigEntry[] {
   return Array.isArray(config) ? (config as TsdownConfigEntry[]) : [config as TsdownConfigEntry];
@@ -90,6 +109,7 @@ describe("tsdown config", () => {
         "media-understanding/apply.runtime",
         "index",
         "commands/status.summary.runtime",
+        "provider-dispatcher.runtime",
         "plugins/provider-discovery.runtime",
         "plugins/provider-runtime.runtime",
         "plugins/runtime/index",
@@ -116,6 +136,16 @@ describe("tsdown config", () => {
     expect(entrySources(distGraph as TsdownConfigEntry)).toEqual(
       expect.objectContaining({
         "cli/gateway-lifecycle.runtime": "src/cli/gateway-cli/lifecycle.runtime.ts",
+      }),
+    );
+  });
+
+  it("keeps reply dispatcher lazy runtime behind one root stable dist entry", () => {
+    const distGraph = unifiedDistGraph();
+
+    expect(entrySources(distGraph as TsdownConfigEntry)).toEqual(
+      expect.objectContaining({
+        "provider-dispatcher.runtime": "src/auto-reply/reply/provider-dispatcher.runtime.ts",
       }),
     );
   });
@@ -174,6 +204,67 @@ describe("tsdown config", () => {
     expect(typeof external).toBe("function");
     const externalize = external as TsdownExternalFunction;
     expect(externalize("qrcode-terminal/lib/main.js", undefined, false)).toBe(true);
+  });
+
+  it("routes externalized bundled plugin chunks under their excluded dist subtree", () => {
+    const configured = unifiedDistGraph()?.outputOptions?.({
+      entryFileNames: "[name].js",
+      chunkFileNames: "[name]-[hash].js",
+    });
+    const entryFileNames = configured?.entryFileNames;
+    const chunkFileNames = configured?.chunkFileNames;
+
+    expect(typeof entryFileNames).toBe("function");
+    expect(typeof chunkFileNames).toBe("function");
+    expect(
+      (
+        entryFileNames as (chunkInfo: {
+          facadeModuleId?: string;
+          moduleIds: string[];
+          name?: string;
+        }) => string
+      )({
+        facadeModuleId: "/repo/extensions/zalouser/src/setup-surface.ts",
+        moduleIds: [],
+        name: "setup-surface",
+      }),
+    ).toBe("extensions/zalouser/[name].js");
+    expect(
+      (
+        entryFileNames as (chunkInfo: {
+          facadeModuleId?: string;
+          moduleIds: string[];
+          name?: string;
+        }) => string
+      )({
+        facadeModuleId: "/repo/extensions/zalouser/index.ts",
+        moduleIds: [],
+        name: "extensions/zalouser/index",
+      }),
+    ).toBe("[name].js");
+    expect(
+      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
+        moduleIds: ["/repo/extensions/feishu/src/client.ts"],
+      }),
+    ).toBe("extensions/feishu/[name]-[hash].js");
+    expect(
+      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
+        moduleIds: ["/repo/extensions/telegram/src/api.ts"],
+      }),
+    ).toBe("[name]-[hash].js");
+    expect(
+      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
+        moduleIds: ["/repo/extensions/feishu/src/client.ts", "/repo/src/shared/string.ts"],
+      }),
+    ).toBe("extensions/feishu/[name]-[hash].js");
+    expect(
+      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
+        moduleIds: [
+          "/repo/extensions/feishu/src/client.ts",
+          "/repo/extensions/telegram/src/api.ts",
+        ],
+      }),
+    ).toBe("[name]-[hash].js");
   });
 
   it("suppresses unresolved imports from extension source", () => {
