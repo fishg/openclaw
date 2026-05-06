@@ -29,6 +29,14 @@ import {
 export { resolveModelSelectionFromDirective } from "./directive-handling.model-selection.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 
+const modelPickerCatalogCache = new WeakMap<
+  OpenClawConfig,
+  WeakMap<
+    readonly { provider: string; id?: string; name?: string }[],
+    Map<string, ModelPickerCatalogEntry[]>
+  >
+>();
+
 function pushUniqueCatalogEntry(params: {
   keys: Set<string>;
   out: ModelPickerCatalogEntry[];
@@ -61,6 +69,17 @@ function buildModelPickerCatalog(params: {
   aliasIndex: ModelAliasIndex;
   allowedModelCatalog: Array<{ provider: string; id?: string; name?: string }>;
 }): ModelPickerCatalogEntry[] {
+  let cachedByCatalog = modelPickerCatalogCache.get(params.cfg);
+  if (!cachedByCatalog) {
+    cachedByCatalog = new WeakMap();
+    modelPickerCatalogCache.set(params.cfg, cachedByCatalog);
+  }
+  const cacheKey = `${params.defaultProvider}|${params.defaultModel}`;
+  const cachedByKey = cachedByCatalog.get(params.allowedModelCatalog);
+  const cached = cachedByKey?.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
   const resolvedDefault = resolveConfiguredModelRef({
     cfg: params.cfg,
     defaultProvider: params.defaultProvider,
@@ -148,6 +167,11 @@ function buildModelPickerCatalog(params: {
     for (const entry of buildConfiguredCatalog()) {
       push(entry);
     }
+    const nextByKey = cachedByKey ?? new Map<string, ModelPickerCatalogEntry[]>();
+    nextByKey.set(cacheKey, out);
+    if (!cachedByKey) {
+      cachedByCatalog.set(params.allowedModelCatalog, nextByKey);
+    }
     return out;
   }
 
@@ -187,6 +211,11 @@ function buildModelPickerCatalog(params: {
     });
   }
 
+  const nextByKey = cachedByKey ?? new Map<string, ModelPickerCatalogEntry[]>();
+  nextByKey.set(cacheKey, out);
+  if (!cachedByKey) {
+    cachedByCatalog.set(params.allowedModelCatalog, nextByKey);
+  }
   return out;
 }
 
