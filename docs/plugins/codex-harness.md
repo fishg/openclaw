@@ -90,9 +90,9 @@ If your config uses `plugins.allow`, include `codex` there too:
 Use `openai-codex/gpt-*` only when you intentionally want Codex OAuth through
 OpenClaw PI. `openclaw doctor --fix` preserves that working subscription route,
 rewrites it to `openai/gpt-*` only when the native Codex runtime or direct
-OpenAI auth path is usable, and can recover prior `openai/gpt-*` PI rewrites
-back to supported `openai-codex/gpt-*` refs when only Codex OAuth auth is
-available.
+OpenAI auth path is usable, can recover prior `openai/gpt-*` PI rewrites back
+to supported `openai-codex/gpt-*` refs when only Codex OAuth auth is available,
+and warns without rewriting when direct OpenAI auth makes the route ambiguous.
 
 ## What this plugin changes
 
@@ -227,6 +227,7 @@ choose one of these outcomes:
 - rewrite to `openai/<model>` plus `agentRuntime.id: "codex"` when Codex is installed, enabled, contributes the `codex` harness, and has usable OAuth
 - rewrite to direct `openai/<model>` on PI only when direct OpenAI auth is already usable and no working Codex OAuth route would be moved
 - recover prior `openai/*` GPT-5 PI rewrites back to supported `openai-codex/*` refs when only Codex OAuth auth is available
+- warn without rewriting when a prior `openai/*` GPT-5 PI rewrite has both Codex OAuth and direct OpenAI auth available
 
 The `codex` route forces the native Codex harness. The `pi` route keeps the
 agent on the default OpenClaw runner instead of enabling or installing Codex as

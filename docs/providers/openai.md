@@ -287,7 +287,9 @@ Choose your preferred auth method and follow the setup steps.
     direct `openai/*` API-key billing. If an earlier repair already rewrote a
     PI Codex OAuth setup to `openai/*` and no direct OpenAI auth is available,
     rerun `openclaw doctor --fix` to recover the route back to
-    `openai-codex/*`.
+    `openai-codex/*`. If direct OpenAI auth is also available, doctor warns and
+    leaves the mixed-auth route unchanged until you confirm whether direct
+    OpenAI API auth or Codex OAuth through PI is intended.
 
     ### Context window cap
 

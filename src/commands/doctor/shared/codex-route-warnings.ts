@@ -31,6 +31,7 @@ type CodexRouteRepairPlan = {
   runtime: CodexRepairRuntime;
   rewriteCodexRoutes: boolean;
   recoverBrokenPiRoutes: boolean;
+  warnBrokenPiRoutes: boolean;
   hasUsableCodexOAuth: boolean;
   hasUsableOpenAIAuth: boolean;
 };
@@ -727,8 +728,9 @@ function rewriteModelConfigSlotToCodex(params: {
       if (!codexModel) {
         return entry;
       }
+      const path = `${params.path}.fallbacks.${index}`;
       params.hits.push({
-        path: `${params.path}.fallbacks.${index}`,
+        path,
         model,
         canonicalModel: codexModel,
       });
@@ -774,8 +776,9 @@ function rewriteModelsMapToCodex(params: {
     if (!codexModel) {
       continue;
     }
+    const path = `${params.path}.${openAIRef}`;
     params.hits.push({
-      path: `${params.path}.${openAIRef}`,
+      path,
       model: openAIRef,
       canonicalModel: codexModel,
     });
@@ -784,9 +787,12 @@ function rewriteModelsMapToCodex(params: {
   }
 }
 
-function clearPiRuntimeOverride(agent: MutableRecord): void {
+function clearPiRuntimeOverride(agent: MutableRecord, inheritedRuntime: string | undefined): void {
   const agentRuntime = asMutableRecord(agent.agentRuntime);
   if (!agentRuntime || normalizeString(agentRuntime.id) !== "pi") {
+    return;
+  }
+  if (inheritedRuntime !== undefined && inheritedRuntime !== "pi") {
     return;
   }
   delete agentRuntime.id;
@@ -860,6 +866,7 @@ function rewriteAgentModelRefsToCodex(params: {
   agent: MutableRecord | undefined;
   path: string;
   currentRuntime: string;
+  inheritedRuntime?: string;
   rewriteModelsMap?: boolean;
 }): void {
   if (!params.agent || params.currentRuntime !== "pi") {
@@ -875,7 +882,7 @@ function rewriteAgentModelRefsToCodex(params: {
       clearsRuntimeOnPrimary: key === "model",
     });
     if (key === "model" && recoveredPrimary) {
-      clearPiRuntimeOverride(params.agent);
+      clearPiRuntimeOverride(params.agent, params.inheritedRuntime);
     }
   }
   rewriteStringModelSlotToCodex({
@@ -1009,10 +1016,12 @@ function rewriteConfigModelRefsToCodex(params: { cfg: OpenClawConfig; env?: Node
     agent: asMutableRecord(nextConfig.agents?.defaults),
     path: "agents.defaults",
     currentRuntime: resolveRuntime({ env: params.env, defaultsRuntime }),
+    inheritedRuntime: undefined,
     rewriteModelsMap: true,
   });
   for (const [index, agent] of (nextConfig.agents?.list ?? []).entries()) {
     const id = typeof agent.id === "string" && agent.id.trim() ? agent.id.trim() : String(index);
+    const inheritedRuntime = resolveRuntime({ env: params.env, defaultsRuntime });
     rewriteAgentModelRefsToCodex({
       hits,
       agent: agent as MutableRecord,
@@ -1022,6 +1031,7 @@ function rewriteConfigModelRefsToCodex(params: { cfg: OpenClawConfig; env?: Node
         agentRuntime: agent.agentRuntime,
         defaultsRuntime,
       }),
+      inheritedRuntime,
     });
   }
   const channelsModelByChannel = asMutableRecord(nextConfig.channels?.modelByChannel);
@@ -1164,7 +1174,8 @@ function resolveCodexRouteRepairPlan(params: {
   return {
     runtime,
     rewriteCodexRoutes,
-    recoverBrokenPiRoutes: runtime === "pi" && hasUsableCodexOAuth && !openAIAuthAvailable,
+    recoverBrokenPiRoutes: hasUsableCodexOAuth && !openAIAuthAvailable,
+    warnBrokenPiRoutes: hasUsableCodexOAuth,
     hasUsableCodexOAuth,
     hasUsableOpenAIAuth: openAIAuthAvailable,
   };
@@ -1174,7 +1185,7 @@ function resolveSessionRouteRepairMode(plan: CodexRouteRepairPlan): CodexSession
   if (plan.rewriteCodexRoutes) {
     return "rewrite-to-openai";
   }
-  return plan.recoverBrokenPiRoutes ? "recover-codex-oauth" : "preserve";
+  return plan.runtime === "pi" && plan.recoverBrokenPiRoutes ? "recover-codex-oauth" : "preserve";
 }
 
 function formatCodexRouteChange(hit: CodexRouteHit, runtime: CodexRepairRuntime): string {
@@ -1186,6 +1197,31 @@ function formatCodexRouteRecovery(hit: CodexRouteHit): string {
   return `${hit.path}: ${hit.model} -> ${hit.canonicalModel}.`;
 }
 
+function formatBrokenPiRouteWarning(hits: CodexRouteHit[], plan: CodexRouteRepairPlan): string {
+  const lines = plan.recoverBrokenPiRoutes
+    ? [
+        "- Direct `openai/*` GPT-5 model refs are configured for PI, but only Codex OAuth auth is available.",
+        ...hits.map(
+          (hit) =>
+            `- ${hit.path}: ${hit.model} can be recovered to ${hit.canonicalModel}${
+              hit.runtime ? `; current runtime is "${hit.runtime}"` : ""
+            }.`,
+        ),
+        "- Run `openclaw doctor --fix` to recover the Codex OAuth PI route instead of leaving the agent on a direct OpenAI API route without OpenAI API auth.",
+      ]
+    : [
+        "- Direct `openai/*` GPT-5 model refs are configured for PI while Codex OAuth auth is also available.",
+        ...hits.map(
+          (hit) =>
+            `- ${hit.path}: ${hit.model} can use direct OpenAI auth or ${hit.canonicalModel} for Codex OAuth through PI${
+              hit.runtime ? `; current runtime is "${hit.runtime}"` : ""
+            }.`,
+        ),
+        "- `openclaw doctor --fix` leaves these mixed-auth routes unchanged because direct OpenAI auth is usable; confirm the direct OpenAI API route is intentional or switch back to `openai-codex/*` for Codex OAuth through PI.",
+      ];
+  return lines.join("\n");
+}
+
 export function collectCodexRouteWarnings(params: {
   cfg: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
@@ -1195,7 +1231,7 @@ export function collectCodexRouteWarnings(params: {
     cfg: params.cfg,
     env: params.env,
   });
-  const recoverableHits = plan.recoverBrokenPiRoutes
+  const recoverableHits = plan.warnBrokenPiRoutes
     ? collectRecoverableOpenAIModelRefs(params.cfg, params.env)
     : [];
   if (hits.length === 0 && recoverableHits.length === 0) {
@@ -1222,18 +1258,11 @@ export function collectCodexRouteWarnings(params: {
     );
   }
   if (recoverableHits.length > 0) {
-    warnings.push(
-      [
-        "- Direct `openai/*` GPT-5 model refs are configured for PI, but only Codex OAuth auth is available.",
-        ...recoverableHits.map(
-          (hit) =>
-            `- ${hit.path}: ${hit.model} can be recovered to ${hit.canonicalModel}${
-              hit.runtime ? `; current runtime is "${hit.runtime}"` : ""
-            }.`,
-        ),
-        "- Run `openclaw doctor --fix` to recover the Codex OAuth PI route instead of leaving the agent on a direct OpenAI API route without OpenAI API auth.",
-      ].join("\n"),
-    );
+    if (plan.recoverBrokenPiRoutes) {
+      warnings.push(formatBrokenPiRouteWarning(recoverableHits, plan));
+    } else {
+      warnings.push(formatBrokenPiRouteWarning(recoverableHits, plan));
+    }
   }
   return warnings;
 }
@@ -1253,7 +1282,11 @@ export function maybeRepairCodexRoutes(params: {
   const recoverableHits = plan.recoverBrokenPiRoutes
     ? collectRecoverableOpenAIModelRefs(params.cfg, params.env)
     : [];
-  if (hits.length === 0 && recoverableHits.length === 0) {
+  const mixedAuthHits =
+    !plan.recoverBrokenPiRoutes && plan.warnBrokenPiRoutes
+      ? collectRecoverableOpenAIModelRefs(params.cfg, params.env)
+      : [];
+  if (hits.length === 0 && recoverableHits.length === 0 && mixedAuthHits.length === 0) {
     return { cfg: params.cfg, warnings: [], changes: [] };
   }
   if (!params.shouldRepair) {
@@ -1300,6 +1333,9 @@ export function maybeRepairCodexRoutes(params: {
           .join("\n")}`,
       );
     }
+  }
+  if (mixedAuthHits.length > 0) {
+    warnings.push(formatBrokenPiRouteWarning(mixedAuthHits, plan));
   }
   return {
     cfg,

@@ -108,7 +108,7 @@ cat ~/.openclaw/openclaw.json
     - Gateway runtime checks (service installed but not running; cached launchd label).
     - Channel status warnings (probed from the running gateway).
     - WhatsApp responsiveness checks for degraded Gateway event-loop health with local TUI clients still running; `--fix` stops only verified local TUI clients.
-    - Codex route repair for `openai-codex/*` model refs in primary models, fallbacks, heartbeat/subagent/compaction overrides, hooks, channel model overrides, and session route pins; `--fix` preserves working Codex OAuth PI routes, rewrites to `openai/*` only when the native Codex runtime or direct OpenAI auth path is usable, and recovers prior `openai/*` GPT-5 PI rewrites when only Codex OAuth auth is available.
+    - Codex route repair for `openai-codex/*` model refs in primary models, fallbacks, heartbeat/subagent/compaction overrides, hooks, channel model overrides, and session route pins; `--fix` preserves working Codex OAuth PI routes, rewrites to `openai/*` only when the native Codex runtime or direct OpenAI auth path is usable, recovers prior `openai/*` GPT-5 PI rewrites when only Codex OAuth auth is available, and warns without rewriting when both Codex OAuth and direct OpenAI auth make an already-rewritten PI route ambiguous.
     - Supervisor config audit (launchd/systemd/schtasks) with optional repair.
     - Embedded proxy environment cleanup for gateway services that captured shell `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` values during install or update.
     - Gateway runtime best-practice checks (Node vs Bun, version-manager paths).
@@ -271,6 +271,7 @@ That stages grounded durable candidates into the short-term dreaming store while
     - `openai-codex/*` becomes `openai/*` with `agentRuntime.id: "codex"` only when Codex is installed, enabled, contributes the `codex` harness, and has usable OAuth.
     - `openai-codex/*` becomes `openai/*` on PI only when direct OpenAI auth is already usable and no working Codex OAuth route would be moved.
     - Prior `openai/*` GPT-5 PI rewrites are recovered back to supported `openai-codex/*` refs when only Codex OAuth auth is available.
+    - Prior `openai/*` GPT-5 PI rewrites warn and stay unchanged when direct OpenAI auth is also usable, so users can confirm whether the direct OpenAI API route is intentional before switching back to Codex OAuth through PI.
     - Existing model fallback lists are preserved when refs are rewritten or recovered; copied per-model settings move with the selected key.
     - Persisted session `modelProvider`/`providerOverride`, `model`/`modelOverride`, fallback notices, auth-profile pins, and Codex harness pins are repaired across all discovered agent session stores when the route can be moved safely.
     - `/codex ...` means "control or bind a native Codex conversation from chat."
