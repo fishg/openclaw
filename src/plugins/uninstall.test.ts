@@ -988,6 +988,7 @@ describe("uninstallPlugin", () => {
         "npm",
         "uninstall",
         "--loglevel=error",
+        "--legacy-peer-deps",
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
@@ -1000,6 +1001,7 @@ describe("uninstallPlugin", () => {
         timeoutMs: 300_000,
         env: expect.objectContaining({
           NPM_CONFIG_IGNORE_SCRIPTS: "true",
+          npm_config_legacy_peer_deps: "true",
           npm_config_package_lock: "true",
         }),
       }),
@@ -1076,6 +1078,19 @@ describe("uninstallPlugin", () => {
     const peerPluginDir = path.join(npmRoot, "node_modules", "peer-plugin");
     const peerLink = path.join(peerPluginDir, "node_modules", "openclaw");
     await fs.mkdir(peerLink, { recursive: true });
+    await fs.writeFile(
+      path.join(npmRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "missing-plugin": "1.0.0",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
     await fs.writeFile(
       path.join(peerPluginDir, "package.json"),
       `${JSON.stringify(
