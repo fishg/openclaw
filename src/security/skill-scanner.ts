@@ -334,42 +334,6 @@ function findSourceRuleMatch(params: {
   return { line: 1, evidence: params.source.slice(0, 120) };
 }
 
-function findSourceRuleMatch(params: {
-  rule: SourceRule;
-  source: string;
-  lines: string[];
-}): { line: number; evidence: string } | null {
-  if (!params.rule.pattern.test(params.source)) {
-    return null;
-  }
-  if (params.rule.requiresContext && !params.rule.requiresContext.test(params.source)) {
-    return null;
-  }
-
-  for (let i = 0; i < params.lines.length; i++) {
-    if (!params.rule.pattern.test(params.lines[i] ?? "")) {
-      continue;
-    }
-
-    if (params.rule.requiresContext && params.rule.requiresContextWindowLines !== undefined) {
-      const start = Math.max(0, i - params.rule.requiresContextWindowLines);
-      const end = Math.min(params.lines.length, i + params.rule.requiresContextWindowLines + 1);
-      const windowSource = params.lines.slice(start, end).join("\n");
-      if (!params.rule.requiresContext.test(windowSource)) {
-        continue;
-      }
-    }
-
-    return { line: i + 1, evidence: params.lines[i] ?? "" };
-  }
-
-  if (params.rule.requiresContextWindowLines !== undefined) {
-    return null;
-  }
-
-  return { line: 1, evidence: params.source.slice(0, 120) };
-}
-
 export function scanSource(source: string, filePath: string): SkillScanFinding[] {
   const findings: SkillScanFinding[] = [];
   const lines = source.split("\n");

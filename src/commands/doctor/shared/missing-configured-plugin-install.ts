@@ -8,7 +8,11 @@ import { listChannelPluginCatalogEntries } from "../../../channels/plugins/catal
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../../../config/types.plugins.js";
 import { parseClawHubPluginSpec } from "../../../infra/clawhub-spec.js";
-import { parseRegistryNpmSpec } from "../../../infra/npm-registry-spec.js";
+import {
+  isExactSemverVersion,
+  isPrereleaseSemverVersion,
+  parseRegistryNpmSpec,
+} from "../../../infra/npm-registry-spec.js";
 import {
   normalizeUpdateChannel,
   resolveRegistryUpdateChannel,
