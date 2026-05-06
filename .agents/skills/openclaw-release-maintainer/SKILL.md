@@ -42,26 +42,23 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   config footprint move, so do not blindly copy stale replacement annotations
   into release notes.
 - Do not delete or rewrite beta tags after their matching npm package has been
-  published. If a pushed beta tag fails preflight before npm publish, delete and
-  recreate the tag and prerelease at the fixed commit so npm prerelease versions
-  stay contiguous. If a published beta needs a fix, commit the fix on the
-  release branch and increment to the next `-beta.N`.
-- For a beta release train, run the fast local preflight first, then publish all
-  beta artifacts for the same version: core `openclaw` npm to dist-tag `beta`,
-  all publishable `@openclaw/*` plugin npm packages to dist-tag `beta`, and all
-  publishable plugins to ClawHub. A beta is not considered live or complete
-  until core npm, plugin npm, and plugin ClawHub publishes are all done and
-  verified for the exact same `YYYY.M.D-beta.N` version. Then run the expensive
-  published-package roster focused on install/update/Docker/Parallels/NPM
-  Telegram. If anything fails, fix it on the release branch, commit/push/pull,
-  increment beta number, and repeat. Run the full expensive roster at least once
-  before stable/latest promotion; for later beta attempts, rerun only lanes
-  whose evidence changed unless the fix touches broad release, install/update,
-  plugin, Docker, Parallels, or live QA behavior. After each complete beta is
-  published, scan current `main` once for critical fixes that landed after the
-  release branch cut and backport only important low-risk fixes. Operators may
-  authorize up to 4 autonomous beta attempts; after 4 failed beta attempts, stop
-  and report.
+  published. If a pushed beta tag fails before npm publish, the version is not
+  consumed: keep the same `-beta.N`, delete/recreate or force-move the git tag
+  and prerelease to the fixed commit, and rerun preflight. Do not increment to
+  the next beta number until the matching npm package has actually published.
+  If a published beta needs a fix, commit the fix on the release branch and
+  increment to the next `-beta.N`.
+- For a beta release train, run the fast local preflight first, publish the
+  beta to npm `beta`, then run the expensive published-package roster focused
+  on install/update/Docker/Parallels/NPM Telegram. If anything fails, fix it on
+  the release branch, commit/push/pull, increment beta number, and repeat. Run
+  the full expensive roster at least once before stable/latest promotion; for
+  later beta attempts, rerun only lanes whose evidence changed unless the fix
+  touches broad release, install/update, plugin, Docker, Parallels, or live QA
+  behavior. After each beta is published, scan current `main` once for critical
+  fixes that landed after the release branch cut and backport only important
+  low-risk fixes. Operators may authorize up to 4 autonomous beta attempts;
+  after 4 failed beta attempts, stop and report.
 - Use `/changelog` before version/tag preparation so the top changelog section
   is deduped and ordered by user impact.
 - Do not create beta-specific `CHANGELOG.md` headings. Beta releases use the

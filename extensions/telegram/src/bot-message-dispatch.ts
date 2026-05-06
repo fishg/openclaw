@@ -511,7 +511,10 @@ export const dispatchTelegramMessage = async ({
   const progressDraftGate = createChannelProgressDraftGate({
     onStart: () => renderProgressDraft({ flush: true }),
   });
-  const pushPreviewToolProgress = async (line?: string, options?: { toolName?: string }) => {
+  const pushPreviewToolProgress = async (
+    line?: string,
+    options?: { toolName?: string; startImmediately?: boolean },
+  ) => {
     if (!answerLane.stream) {
       return;
     }
@@ -548,6 +551,19 @@ export const dispatchTelegramMessage = async ({
           -resolveChannelProgressDraftMaxLines(telegramCfg),
         );
       }
+    }
+    if (
+      options?.startImmediately &&
+      previewToolProgressEnabled &&
+      !previewToolProgressSuppressed &&
+      normalized
+    ) {
+      const alreadyStarted = progressDraftGate.hasStarted;
+      await progressDraftGate.startNow();
+      if (alreadyStarted && progressDraftGate.hasStarted) {
+        await renderProgressDraft();
+      }
+      return;
     }
     const alreadyStarted = progressDraftGate.hasStarted;
     await progressDraftGate.noteWork();
@@ -1198,12 +1214,10 @@ export const dispatchTelegramMessage = async ({
                     : undefined,
                   suppressDefaultToolProgressMessages:
                     !previewStreamingEnabled || Boolean(answerLane.stream),
+                  allowProgressCallbacksWhenSourceDeliverySuppressed: Boolean(answerLane.stream),
                   onToolStart: async (payload) => {
                     const toolName = payload.name?.trim();
-                    if (statusReactionController && toolName) {
-                      await statusReactionController.setTool(toolName);
-                    }
-                    await pushPreviewToolProgress(
+                    const progressPromise = pushPreviewToolProgress(
                       formatChannelProgressDraftLineForEntry(
                         telegramCfg,
                         {
@@ -1214,8 +1228,12 @@ export const dispatchTelegramMessage = async ({
                         },
                         payload.detailMode ? { detailMode: payload.detailMode } : undefined,
                       ),
-                      { toolName },
+                      { toolName, startImmediately: true },
                     );
+                    if (statusReactionController && toolName) {
+                      await statusReactionController.setTool(toolName);
+                    }
+                    await progressPromise;
                   },
                   onItemEvent: async (payload) => {
                     await pushPreviewToolProgress(
