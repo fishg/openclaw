@@ -207,28 +207,15 @@ export function resolveDefaultModelForAgent(params: {
   cfg: OpenClawConfig;
   agentId?: string;
 }): ModelRef {
-  const startedAt = Date.now();
-  const logStage = (stage: string, extra?: string) => {
-    const suffix = extra ? ` ${extra}` : "";
-    console.log(
-      `[default-model-agent] stage=${stage} elapsedMs=${Date.now() - startedAt}${suffix}`,
-    );
-  };
   const agentModelOverride = params.agentId
     ? resolveAgentEffectiveModelPrimary(params.cfg, params.agentId)
     : undefined;
-  logStage("agent-override-resolved", `hasOverride=${String(Boolean(agentModelOverride))}`);
   const resolved = resolveConfiguredModelRef({
     cfg: params.cfg,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
     rawModelOverride: agentModelOverride,
   });
-  logStage("effective-config-ready");
-  logStage(
-    "configured-model-ref-resolved",
-    `provider=${resolved.provider} model=${resolved.model}`,
-  );
   return resolved;
 }
 

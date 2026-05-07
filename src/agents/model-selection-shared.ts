@@ -68,6 +68,15 @@ const preparedAllowedCatalogCache = new WeakMap<
   OpenClawConfig,
   WeakMap<readonly ModelCatalogEntry[], Map<string, PreparedAllowedCatalogData>>
 >();
+type AllowedModelSetResult = {
+  allowAny: boolean;
+  allowedCatalog: ModelCatalogEntry[];
+  allowedKeys: Set<string>;
+};
+const buildAllowedModelSetResultCache = new WeakMap<
+  OpenClawConfig,
+  WeakMap<readonly ModelCatalogEntry[], Map<string, AllowedModelSetResult>>
+>();
 type ManifestNormalizationContext = {
   manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 };
@@ -562,11 +571,6 @@ export function buildModelAliasIndex(
     allowPluginNormalization?: boolean;
   } & ManifestNormalizationContext,
 ): ModelAliasIndex {
-  const startedAt = Date.now();
-  const logStage = (stage: string, extra?: string) => {
-    const suffix = extra ? ` ${extra}` : "";
-    console.log(`[alias-index] stage=${stage} elapsedMs=${Date.now() - startedAt}${suffix}`);
-  };
   const artifacts = resolveConfiguredModelArtifacts({
     cfg: params.cfg,
     defaultProvider: params.defaultProvider,
@@ -574,13 +578,7 @@ export function buildModelAliasIndex(
     allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
   });
-  logStage(
-    "configured-artifacts",
-    `aliases=${artifacts.aliasIndex.byAlias.size} parsed=${artifacts.parsedAllowlistEntries.length}`,
-  );
-  const cloned = cloneModelAliasIndex(artifacts.aliasIndex);
-  logStage("clone", `aliases=${cloned.byAlias.size}`);
-  return cloned;
+  return cloneModelAliasIndex(artifacts.aliasIndex);
 }
 
 type ModelCatalogMetadata = {
@@ -936,11 +934,35 @@ export function buildAllowedModelSetWithFallbacks(params: {
   defaultProvider: string;
   defaultModel?: string;
   fallbackModels: readonly string[];
-}): {
-  allowAny: boolean;
-  allowedCatalog: ModelCatalogEntry[];
-  allowedKeys: Set<string>;
-} {
+}): AllowedModelSetResult {
+  const resultCacheKey = `${params.defaultProvider}\0${params.defaultModel ?? ""}\0${params.fallbackModels.join("\0")}`;
+  let byConfig = buildAllowedModelSetResultCache.get(params.cfg);
+  if (!byConfig) {
+    byConfig = new WeakMap();
+    buildAllowedModelSetResultCache.set(params.cfg, byConfig);
+  }
+  let byCatalog = byConfig.get(params.catalog);
+  if (!byCatalog) {
+    byCatalog = new Map();
+    byConfig.set(params.catalog, byCatalog);
+  }
+  const cachedResult = byCatalog.get(resultCacheKey);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  const result = buildAllowedModelSetWithFallbacksImpl(params);
+  byCatalog.set(resultCacheKey, result);
+  return result;
+}
+
+function buildAllowedModelSetWithFallbacksImpl(params: {
+  cfg: OpenClawConfig;
+  catalog: ModelCatalogEntry[];
+  defaultProvider: string;
+  defaultModel?: string;
+  fallbackModels: readonly string[];
+}): AllowedModelSetResult {
   const prepared = prepareAllowedCatalogData({
     cfg: params.cfg,
     catalog: params.catalog,
