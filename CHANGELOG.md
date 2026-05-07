@@ -18,6 +18,7 @@ Docs: https://docs.openclaw.ai
 - Plugins/channel setup: forward `setChannelRuntime` from non-bundled external plugin setup entries so deferred external channel runtime initializers are installed before startup polling. Fixes #77779. (#77799) Thanks @openperf.
 - Telegram: treat successful same-chat `message` tool outbound sends during an inbound Telegram turn as delivered when deciding whether to emit the rewritten silent reply fallback. (#78685) Thanks @neeravmakwana.
 - Gateway/tasks: reconcile stale CLI run-context tasks whose live run context disappeared and bound channel hot-reload deferrals so stale task records cannot block Discord/Slack/Telegram reloads forever.
+- Discord/voice: audit Discord voice-channel permissions in `channels capabilities` and `channels status --probe`, including auto-join targets, so missing Connect/Speak/Read Message History permissions show up before `/vc join`.
 - Model providers: normalize APNG sniffed PNG uploads, preserve Gemini 3 tool-call thought-signature replay with fallback signatures, accept legacy `__env__:VAR` custom-provider keys, and repair snake_case tool-call transcript sanitization. Fixes #51881, #48915, #77566, and #42858.
 - Telegram/models: parse provider ids containing dots in `/models` callback buttons so `hf.co` model lists render as inline keyboard buttons. Fixes #38745.
 
