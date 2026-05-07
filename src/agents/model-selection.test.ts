@@ -1281,6 +1281,30 @@ describe("model-selection", () => {
       expect(result).toEqual({ provider: "openai", model: "xiaomi/mimo-v2-pro-mit" });
     });
 
+    it("resolves slash-form raw model overrides through configured aliases", () => {
+      const cfg = {
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-5.4" },
+            models: {
+              "openai/xiaomi/mimo-v2-pro-mit": {
+                alias: "xiaomi/mimo-v2-pro-mit",
+              },
+            },
+          },
+        },
+      } as OpenClawConfig;
+
+      const result = resolveConfiguredModelRef({
+        cfg,
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        rawModelOverride: "xiaomi/mimo-v2-pro-mit",
+      });
+
+      expect(result).toEqual({ provider: "openai", model: "xiaomi/mimo-v2-pro-mit" });
+    });
+
     it("should use default provider/model if config is empty", () => {
       const cfg: Partial<OpenClawConfig> = {};
       const result = resolveConfiguredModelRef({
@@ -1730,6 +1754,36 @@ describe("resolveDefaultModelForAgent", () => {
     expect(resolveDefaultModelForAgent({ cfg, agentId: "main" })).toEqual({
       provider: "openai-codex",
       model: "gpt-5.5",
+    });
+  });
+
+  it("keeps slash-form agent aliases working through the override path", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-5.4",
+          },
+          models: {
+            "openai/xiaomi/mimo-v2-pro-mit": {
+              alias: "xiaomi/mimo-v2-pro-mit",
+            },
+          },
+        },
+        list: [
+          {
+            id: "main",
+            model: {
+              primary: "xiaomi/mimo-v2-pro-mit",
+            },
+          },
+        ],
+      },
+    } as OpenClawConfig;
+
+    expect(resolveDefaultModelForAgent({ cfg, agentId: "main" })).toEqual({
+      provider: "openai",
+      model: "xiaomi/mimo-v2-pro-mit",
     });
   });
 });

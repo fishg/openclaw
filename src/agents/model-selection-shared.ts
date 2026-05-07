@@ -54,7 +54,10 @@ const configuredModelArtifactsCache = new WeakMap<
   Map<string, ConfiguredModelArtifacts>
 >();
 const configuredModelCatalogCache = new WeakMap<OpenClawConfig, ModelCatalogEntry[]>();
-const configuredUniqueProviderIndexCache = new WeakMap<OpenClawConfig, Map<string, string | null>>();
+const configuredUniqueProviderIndexCache = new WeakMap<
+  OpenClawConfig,
+  Map<string, string | null>
+>();
 const resolvedModelRefFromStringCache = new WeakMap<
   OpenClawConfig,
   Map<string, { ref: ModelRef; alias?: string } | null>
@@ -130,6 +133,7 @@ function configuredRuntimeCacheKey(params: {
   allowPluginNormalization?: boolean;
   raw?: string;
   defaultModel?: string;
+  rawModelOverride?: string;
 }): string {
   return [
     normalizeProviderId(params.defaultProvider),
@@ -137,6 +141,7 @@ function configuredRuntimeCacheKey(params: {
     params.allowPluginNormalization === false ? "plugin:off" : "plugin:on",
     params.raw?.trim() ?? "",
     params.defaultModel?.trim() ?? "",
+    params.rawModelOverride?.trim() ?? "",
   ].join("|");
 }
 
@@ -439,6 +444,38 @@ function parseModelRefWithCompatAlias(
   );
 }
 
+function resolveSlashFormConfiguredAliasMatch(
+  params: {
+    cfg?: OpenClawConfig;
+    raw: string;
+    defaultProvider: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
+  } & ManifestNormalizationContext,
+): ModelRef | null {
+  const aliasKey = normalizeLowercaseStringOrEmpty(params.raw);
+  const rawModels = params.cfg?.agents?.defaults?.models ?? {};
+  if (!aliasKey || !params.raw.includes("/") || Object.keys(rawModels).length === 0) {
+    return null;
+  }
+  for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
+    const alias =
+      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
+    if (!alias || normalizeLowercaseStringOrEmpty(alias) !== aliasKey || !keyRaw.includes("/")) {
+      continue;
+    }
+    return parseModelRefWithCompatAlias({
+      cfg: params.cfg,
+      raw: keyRaw,
+      defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
+      manifestPlugins: params.manifestPlugins,
+    });
+  }
+  return null;
+}
+
 function resolveExactConfiguredProviderRef(
   params: {
     cfg?: OpenClawConfig;
@@ -525,15 +562,25 @@ export function buildModelAliasIndex(
     allowPluginNormalization?: boolean;
   } & ManifestNormalizationContext,
 ): ModelAliasIndex {
-  return cloneModelAliasIndex(
-    resolveConfiguredModelArtifacts({
-      cfg: params.cfg,
-      defaultProvider: params.defaultProvider,
-      allowManifestNormalization: params.allowManifestNormalization,
-      allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins: params.manifestPlugins,
-    }).aliasIndex,
+  const startedAt = Date.now();
+  const logStage = (stage: string, extra?: string) => {
+    const suffix = extra ? ` ${extra}` : "";
+    console.log(`[alias-index] stage=${stage} elapsedMs=${Date.now() - startedAt}${suffix}`);
+  };
+  const artifacts = resolveConfiguredModelArtifacts({
+    cfg: params.cfg,
+    defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
+  });
+  logStage(
+    "configured-artifacts",
+    `aliases=${artifacts.aliasIndex.byAlias.size} parsed=${artifacts.parsedAllowlistEntries.length}`,
   );
+  const cloned = cloneModelAliasIndex(artifacts.aliasIndex);
+  logStage("clone", `aliases=${cloned.byAlias.size}`);
+  return cloned;
 }
 
 type ModelCatalogMetadata = {
@@ -769,12 +816,14 @@ export function resolveConfiguredModelRef(params: {
   defaultModel: string;
   allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  rawModelOverride?: string;
 }): ModelRef {
   const cacheKey = configuredRuntimeCacheKey({
     defaultProvider: params.defaultProvider,
     defaultModel: params.defaultModel,
     allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
+    rawModelOverride: params.rawModelOverride,
   });
   const cachedByKey = resolvedConfiguredModelRefCache.get(params.cfg);
   const cached = cachedByKey?.get(cacheKey);
@@ -796,23 +845,26 @@ function resolveConfiguredModelRefUncached(params: {
   defaultModel: string;
   allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  rawModelOverride?: string;
 }): ModelRef {
-  const rawModel = resolveAgentModelPrimaryValue(params.cfg.agents?.defaults?.model) ?? "";
+  const rawModel =
+    normalizeOptionalString(params.rawModelOverride) ??
+    resolveAgentModelPrimaryValue(params.cfg.agents?.defaults?.model) ??
+    "";
   if (rawModel) {
     const trimmed = rawModel.trim();
-    const aliasIndex = buildModelAliasIndex({
-      cfg: params.cfg,
-      defaultProvider: params.defaultProvider,
-      allowManifestNormalization: params.allowManifestNormalization,
-      allowPluginNormalization: params.allowPluginNormalization,
-    });
-    const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
-    const aliasMatch = aliasIndex.byAlias.get(aliasKey);
-    if (aliasMatch) {
-      return aliasMatch.ref;
-    }
-
     if (!trimmed.includes("/")) {
+      const aliasIndex = buildModelAliasIndex({
+        cfg: params.cfg,
+        defaultProvider: params.defaultProvider,
+        allowManifestNormalization: params.allowManifestNormalization,
+        allowPluginNormalization: params.allowPluginNormalization,
+      });
+      const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
+      const aliasMatch = aliasIndex.byAlias.get(aliasKey);
+      if (aliasMatch) {
+        return aliasMatch.ref;
+      }
       const openrouterCompatRef = resolveConfiguredOpenRouterCompatAlias({
         cfg: params.cfg,
         raw: trimmed,
@@ -840,11 +892,21 @@ function resolveConfiguredModelRefUncached(params: {
       return { provider: params.defaultProvider, model: trimmed };
     }
 
+    const slashFormAliasMatch = resolveSlashFormConfiguredAliasMatch({
+      cfg: params.cfg,
+      raw: trimmed,
+      defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
+    });
+    if (slashFormAliasMatch) {
+      return slashFormAliasMatch;
+    }
+
     const resolved = resolveModelRefFromString({
       cfg: params.cfg,
       raw: trimmed,
       defaultProvider: params.defaultProvider,
-      aliasIndex,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
     });

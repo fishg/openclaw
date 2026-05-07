@@ -1,7 +1,6 @@
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
-  toAgentModelListLike,
 } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -208,30 +207,29 @@ export function resolveDefaultModelForAgent(params: {
   cfg: OpenClawConfig;
   agentId?: string;
 }): ModelRef {
+  const startedAt = Date.now();
+  const logStage = (stage: string, extra?: string) => {
+    const suffix = extra ? ` ${extra}` : "";
+    console.log(
+      `[default-model-agent] stage=${stage} elapsedMs=${Date.now() - startedAt}${suffix}`,
+    );
+  };
   const agentModelOverride = params.agentId
     ? resolveAgentEffectiveModelPrimary(params.cfg, params.agentId)
     : undefined;
-  const cfg =
-    agentModelOverride && agentModelOverride.length > 0
-      ? {
-          ...params.cfg,
-          agents: {
-            ...params.cfg.agents,
-            defaults: {
-              ...params.cfg.agents?.defaults,
-              model: {
-                ...toAgentModelListLike(params.cfg.agents?.defaults?.model),
-                primary: agentModelOverride,
-              },
-            },
-          },
-        }
-      : params.cfg;
-  return resolveConfiguredModelRef({
-    cfg,
+  logStage("agent-override-resolved", `hasOverride=${String(Boolean(agentModelOverride))}`);
+  const resolved = resolveConfiguredModelRef({
+    cfg: params.cfg,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
+    rawModelOverride: agentModelOverride,
   });
+  logStage("effective-config-ready");
+  logStage(
+    "configured-model-ref-resolved",
+    `provider=${resolved.provider} model=${resolved.model}`,
+  );
+  return resolved;
 }
 
 function resolveAllowedFallbacks(params: { cfg: OpenClawConfig; agentId?: string }): string[] {
