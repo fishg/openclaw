@@ -15,6 +15,8 @@ Docs: https://docs.openclaw.ai
 - Agent delivery: report `deliverySucceeded=false` when outbound delivery returns no adapter result, so claimed/empty delivery paths no longer masquerade as successful sends. Fixes #78532. Thanks @joeyfrasier.
 - Telegram: keep the polling watchdog tied to `getUpdates` liveness so unrelated outbound Bot API calls cannot mask a wedged inbound poller. Fixes #78422. Thanks @ai-hpc.
 - Agents/subagents: have completed session-mode subagent registry rows honor `agents.defaults.subagents.archiveAfterMinutes` instead of a hardcoded 5-minute TTL, so registry-backed surfaces keep one retention knob across spawn modes. (#78263) Thanks @arniesaha.
+- Plugins/channel setup: forward `setChannelRuntime` from non-bundled external plugin setup entries so deferred external channel runtime initializers are installed before startup polling. Fixes #77779. (#77799) Thanks @openperf.
+- Telegram: treat successful same-chat `message` tool outbound sends during an inbound Telegram turn as delivered when deciding whether to emit the rewritten silent reply fallback. (#78685) Thanks @neeravmakwana.
 
 ## 2026.5.6
 
