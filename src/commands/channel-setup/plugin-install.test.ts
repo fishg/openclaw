@@ -424,7 +424,7 @@ describe("ensureChannelSetupPluginInstalled", () => {
     });
 
     expectRecordFields(requireMockCallArg(installPluginFromNpmSpec, 0), "npm install args", {
-      extensionsDir: path.join(profileStateDir, "extensions"),
+      extensionsDir: path.resolve(profileStateDir, "extensions"),
       spec: bundledChatNpmSpec,
     });
   });
