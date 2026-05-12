@@ -432,7 +432,7 @@ describe("package artifact reuse", () => {
     expect(workflow).toContain("OPENCLAW_LIVE_SUITE_ADVISORY: ${{ matrix.advisory }}");
     expect(workflow).toContain("Advisory live suite failed with exit code");
     for (const jobName of [
-      "validate_native_live_suites",
+      "validate_live_provider_suites",
       "validate_live_docker_provider_suites",
       "validate_live_media_provider_suites",
     ]) {
