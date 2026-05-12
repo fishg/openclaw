@@ -682,10 +682,9 @@ describe("plugin sdk alias helpers", () => {
         "./plugin-sdk/core": { default: "./dist/plugin-sdk/core.js" },
       },
     });
-    fs.writeFileSync(
+    fs.rmSync(
       path.join(fixture.root, "scripts", "lib", "plugin-sdk-private-local-only-subpaths.json"),
-      JSON.stringify(["codex-native-task-runtime", "qa-runtime"], null, 2),
-      "utf-8",
+      { force: true },
     );
     fs.writeFileSync(
       path.join(fixture.root, "dist", "plugin-sdk", "codex-native-task-runtime.js"),
@@ -974,10 +973,9 @@ describe("plugin sdk alias helpers", () => {
     );
     const distQaRuntimePath = path.join(fixture.root, "dist", "plugin-sdk", "qa-runtime.js");
     fs.writeFileSync(distRootAlias, "module.exports = {};\n", "utf-8");
-    fs.writeFileSync(
+    fs.rmSync(
       path.join(fixture.root, "scripts", "lib", "plugin-sdk-private-local-only-subpaths.json"),
-      JSON.stringify(["codex-native-task-runtime", "qa-runtime"], null, 2),
-      "utf-8",
+      { force: true },
     );
     fs.writeFileSync(
       distCodexNativeTaskRuntimePath,
