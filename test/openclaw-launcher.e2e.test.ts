@@ -38,9 +38,25 @@ async function addCompileCacheProbe(fixtureRoot: string): Promise<void> {
   );
 }
 
-async function waitForFile(filePath: string, timeoutMs: number): Promise<string> {
+function isJsonContent(content: string): boolean {
   try {
-    return await fs.readFile(filePath, "utf8");
+    JSON.parse(content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForFile(
+  filePath: string,
+  timeoutMs: number,
+  isReady: (content: string) => boolean = () => true,
+): Promise<string> {
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    if (isReady(content)) {
+      return content;
+    }
   } catch {
     // Wait below.
   }
@@ -59,8 +75,15 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<string>
       watcher?.close();
     };
     const tryRead = async () => {
+      if (settled) {
+        return;
+      }
       try {
         const content = await fs.readFile(filePath, "utf8");
+        if (!isReady(content)) {
+          setTimeout(() => void tryRead(), 10);
+          return;
+        }
         cleanup();
         resolve(content);
       } catch {
@@ -250,7 +273,9 @@ describe("openclaw launcher", () => {
       let respawnChildPid: number | undefined;
 
       try {
-        const childInfo = JSON.parse(await waitForFile(childInfoPath, 5000)) as { pid: number };
+        const childInfo = JSON.parse(await waitForFile(childInfoPath, 5000, isJsonContent)) as {
+          pid: number;
+        };
         respawnChildPid = childInfo.pid;
 
         launcher.kill("SIGTERM");
@@ -301,7 +326,9 @@ describe("openclaw launcher", () => {
       let respawnChildPid: number | undefined;
 
       try {
-        const childInfo = JSON.parse(await waitForFile(childInfoPath, 5000)) as { pid: number };
+        const childInfo = JSON.parse(await waitForFile(childInfoPath, 5000, isJsonContent)) as {
+          pid: number;
+        };
         respawnChildPid = childInfo.pid;
 
         launcher.kill("SIGTERM");
