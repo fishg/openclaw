@@ -431,6 +431,18 @@ describe("package artifact reuse", () => {
     expect(workflow).toMatch(/suite_id: native-live-extensions-moonshot[\s\S]*?advisory: true/u);
     expect(workflow).toContain("OPENCLAW_LIVE_SUITE_ADVISORY: ${{ matrix.advisory }}");
     expect(workflow).toContain("Advisory live suite failed with exit code");
+    for (const jobName of [
+      "validate_native_live_suites",
+      "validate_live_docker_provider_suites",
+      "validate_live_media_provider_suites",
+    ]) {
+      expect(workflow).toMatch(
+        new RegExp(
+          `${jobName}:[\\s\\S]*?- name: Run \\$\\{\\{ matrix\\.label \\}\\}[\\s\\S]*?shell: bash`,
+          "u",
+        ),
+      );
+    }
     expect(workflow).toMatch(
       /suite_id: live-gateway-advisory-docker-deepseek-fireworks[\s\S]*?advisory: true/u,
     );
