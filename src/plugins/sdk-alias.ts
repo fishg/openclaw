@@ -467,6 +467,59 @@ function isBundledCodexPluginModulePath(params: { packageRoot: string; modulePat
   );
 }
 
+function isModulePathInsidePackageNamed(params: {
+  modulePath: string;
+  packageName: string;
+  maxDepth?: number;
+}) {
+  let cursor = path.dirname(path.resolve(params.modulePath));
+  const maxDepth = params.maxDepth ?? 12;
+  for (let i = 0; i < maxDepth; i += 1) {
+    const parsed = tryReadJsonSync<{ name?: unknown }>(path.join(cursor, "package.json"));
+    if (parsed && typeof parsed.name === "string") {
+      return parsed.name.trim() === params.packageName;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      break;
+    }
+    cursor = parent;
+  }
+  return false;
+}
+
+function isModulePathInsideNodeModulesPackage(params: { modulePath: string; packageName: string }) {
+  const packageSegments = params.packageName.split("/");
+  if (packageSegments.length === 0 || packageSegments.some((segment) => segment.length === 0)) {
+    return false;
+  }
+  const pathSegments = path.resolve(params.modulePath).split(path.sep);
+  const nodeModulesIndex = pathSegments.lastIndexOf("node_modules");
+  if (nodeModulesIndex < 0) {
+    return false;
+  }
+  const packageStart = nodeModulesIndex + 1;
+  const packageEnd = packageStart + packageSegments.length;
+  if (pathSegments.length <= packageEnd) {
+    return false;
+  }
+  return packageSegments.every((segment, index) => pathSegments[packageStart + index] === segment);
+}
+
+function isCodexPluginModulePath(params: { packageRoot: string; modulePath: string }) {
+  return (
+    isBundledCodexPluginModulePath(params) ||
+    isModulePathInsideNodeModulesPackage({
+      modulePath: params.modulePath,
+      packageName: "@openclaw/codex",
+    }) ||
+    isModulePathInsidePackageNamed({
+      modulePath: params.modulePath,
+      packageName: "@openclaw/codex",
+    })
+  );
+}
+
 function shouldIncludePrivateLocalOnlyPluginSdkSubpath(params: {
   packageRoot: string;
   modulePath: string;
@@ -475,7 +528,7 @@ function shouldIncludePrivateLocalOnlyPluginSdkSubpath(params: {
   return (
     shouldIncludePrivateLocalOnlyPluginSdkSubpaths() ||
     (params.subpath === CODEX_NATIVE_TASK_RUNTIME_PLUGIN_SDK_SUBPATH &&
-      isBundledCodexPluginModulePath({
+      isCodexPluginModulePath({
         packageRoot: params.packageRoot,
         modulePath: params.modulePath,
       }))
@@ -535,7 +588,7 @@ export function listPluginSdkExportedSubpaths(
   if (!packageRoot) {
     return [];
   }
-  const includeCodexPrivateRuntime = isBundledCodexPluginModulePath({ packageRoot, modulePath });
+  const includeCodexPrivateRuntime = isCodexPluginModulePath({ packageRoot, modulePath });
   const cacheKey = `${packageRoot}::privateQa=${shouldIncludePrivateLocalOnlyPluginSdkSubpaths() ? "1" : "0"}::codexPrivate=${includeCodexPrivateRuntime ? "1" : "0"}`;
   const cached = cachedPluginSdkExportedSubpaths.get(cacheKey);
   if (cached) {
@@ -573,7 +626,7 @@ export function resolvePluginSdkScopedAliasMap(
     isProduction: process.env.NODE_ENV === "production",
     pluginSdkResolution: params.pluginSdkResolution,
   });
-  const includeCodexPrivateRuntime = isBundledCodexPluginModulePath({ packageRoot, modulePath });
+  const includeCodexPrivateRuntime = isCodexPluginModulePath({ packageRoot, modulePath });
   const cacheKey = `${packageRoot}::${orderedKinds.join(",")}::privateQa=${shouldIncludePrivateLocalOnlyPluginSdkSubpaths() ? "1" : "0"}::codexPrivate=${includeCodexPrivateRuntime ? "1" : "0"}`;
   const cached = cachedPluginSdkScopedAliasMaps.get(cacheKey);
   if (cached) {
