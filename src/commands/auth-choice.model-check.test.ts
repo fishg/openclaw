@@ -4,13 +4,17 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { warnIfModelConfigLooksOff } from "./auth-choice.model-check.js";
 import { makePrompter } from "./setup/__tests__/test-utils.js";
 
+type ListProfilesForProvider = (store: AuthProfileStore, provider: string) => string[];
+
 const loadModelCatalog = vi.hoisted(() => vi.fn());
 vi.mock("../agents/model-catalog.js", () => ({
   loadModelCatalog,
 }));
 
-const ensureAuthProfileStore = vi.hoisted(() => vi.fn(() => ({ version: 1, profiles: {} })));
-const listProfilesForProvider = vi.hoisted(() => vi.fn(() => []));
+const ensureAuthProfileStore = vi.hoisted(() =>
+  vi.fn<() => AuthProfileStore>(() => ({ version: 1, profiles: {} })),
+);
+const listProfilesForProvider = vi.hoisted(() => vi.fn<ListProfilesForProvider>(() => []));
 vi.mock("../agents/auth-profiles.js", () => ({
   ensureAuthProfileStore,
   listProfilesForProvider,
