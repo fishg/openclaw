@@ -93,7 +93,7 @@ describe("Dockerfile", () => {
 
     expect(dockerfile).toContain("pnpm install --frozen-lockfile \\");
     expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
-    expect(dockerfile).toContain("--config.offline=true");
+    expect(dockerfile).not.toContain("--config.offline=true");
     expect(dockerfile.split("--config.supportedArchitectures.os=linux").length - 1).toBe(2);
     expect(
       dockerfile.split("--config.supportedArchitectures.cpu=\"$(node -p 'process.arch')\"").length -
@@ -175,7 +175,7 @@ describe("Dockerfile", () => {
       "COPY --from=workspace-deps /out/${OPENCLAW_BUNDLED_PLUGIN_DIR}/ ./${OPENCLAW_BUNDLED_PLUGIN_DIR}/",
     );
     expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
-    expect(dockerfile).toContain("--config.offline=true");
+    expect(dockerfile).not.toContain("--config.offline=true");
     expect(dockerfile).toContain("--config.supportedArchitectures.os=linux");
     expect(dockerfile).toContain(
       "--config.supportedArchitectures.cpu=\"$(node -p 'process.arch')\"",
