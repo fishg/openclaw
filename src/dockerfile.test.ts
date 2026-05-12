@@ -92,7 +92,7 @@ describe("Dockerfile", () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
 
     expect(dockerfile).toContain("pnpm install --frozen-lockfile \\");
-    expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
+    expect(dockerfile).toContain("CI=true pnpm prune --prod --ignore-scripts \\");
     expect(dockerfile).not.toContain("--config.offline=true");
     expect(dockerfile.split("--config.supportedArchitectures.os=linux").length - 1).toBe(2);
     expect(
@@ -174,7 +174,7 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain(
       "COPY --from=workspace-deps /out/${OPENCLAW_BUNDLED_PLUGIN_DIR}/ ./${OPENCLAW_BUNDLED_PLUGIN_DIR}/",
     );
-    expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
+    expect(dockerfile).toContain("CI=true pnpm prune --prod --ignore-scripts \\");
     expect(dockerfile).not.toContain("--config.offline=true");
     expect(dockerfile).toContain("--config.supportedArchitectures.os=linux");
     expect(dockerfile).toContain(
@@ -205,7 +205,7 @@ describe("Dockerfile", () => {
     const pnpmWorkspace = YAML.parse(await readFile(pnpmWorkspacePath, "utf8")) as {
       patchedDependencies?: Record<string, string>;
     };
-    const pruneProd = "CI=true pnpm prune --prod";
+    const pruneProd = "CI=true pnpm prune --prod --ignore-scripts";
     const finalWorkspaceCopy =
       "COPY --from=runtime-assets --chown=node:node /app/pnpm-workspace.yaml .";
 

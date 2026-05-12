@@ -122,13 +122,18 @@ FROM build AS runtime-assets
 ARG OPENCLAW_EXTENSIONS
 ARG OPENCLAW_BUNDLED_PLUGIN_DIR
 RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
-    CI=true pnpm prune --prod \
+    echo "==> runtime-assets: prune prod dependencies" && \
+    CI=true pnpm prune --prod --ignore-scripts \
       --config.supportedArchitectures.os=linux \
       --config.supportedArchitectures.cpu="$(node -p 'process.arch')" \
       --config.supportedArchitectures.libc=glibc && \
+    echo "==> runtime-assets: refresh bundled plugin registry" && \
     node scripts/postinstall-bundled-plugins.mjs && \
+    echo "==> runtime-assets: prune non-selected plugin dist" && \
     OPENCLAW_EXTENSIONS="$OPENCLAW_EXTENSIONS" node scripts/prune-docker-plugin-dist.mjs && \
+    echo "==> runtime-assets: remove dist type and sourcemap files" && \
     find dist -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.map' \) -delete && \
+    echo "==> runtime-assets: check package dist imports" && \
     node scripts/check-package-dist-imports.mjs /app
 
 # ── Runtime base image ──────────────────────────────────────────
