@@ -9,6 +9,11 @@ const mocks = vi.hoisted(() => ({
   clackCancel: vi.fn(),
   clackIsCancel: vi.fn(),
   multiselect: vi.fn(),
+  progress: {
+    setLabel: vi.fn(),
+    setPercent: vi.fn(),
+    tick: vi.fn(),
+  },
   promptYesNo: vi.fn(),
   provider: {
     id: "hermes",
@@ -16,7 +21,12 @@ const mocks = vi.hoisted(() => ({
     plan: vi.fn(),
     apply: vi.fn(),
   },
+  withProgress: vi.fn(),
 }));
+
+mocks.withProgress.mockImplementation(
+  async (_opts: unknown, run: (progress: unknown) => unknown) => await run(mocks.progress),
+);
 
 vi.mock("../config/config.js", () => ({
   getRuntimeConfig: () => ({}),
@@ -29,6 +39,10 @@ vi.mock("../config/paths.js", () => ({
 
 vi.mock("../cli/prompt.js", () => ({
   promptYesNo: mocks.promptYesNo,
+}));
+
+vi.mock("../cli/progress.js", () => ({
+  withProgress: mocks.withProgress,
 }));
 
 vi.mock("@clack/prompts", () => ({
@@ -217,6 +231,10 @@ describe("migrateApplyCommand", () => {
     });
     mocks.provider.plan.mockReset();
     mocks.provider.apply.mockReset();
+    mocks.withProgress.mockClear();
+    mocks.progress.setLabel.mockClear();
+    mocks.progress.setPercent.mockClear();
+    mocks.progress.tick.mockClear();
     mocks.multiselect.mockReset();
     mocks.clackCancel.mockReset();
     mocks.clackIsCancel.mockReset();
@@ -300,6 +318,23 @@ describe("migrateApplyCommand", () => {
 
     expect(result).toBe(planned);
     expect(mocks.provider.plan).toHaveBeenCalledTimes(1);
+    expect(mocks.withProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ indeterminate: true, label: "Scanning codex migration…" }),
+      expect.any(Function),
+    );
+  });
+
+  it("does not wrap JSON planning in progress output", async () => {
+    const planned = codexPluginPlan();
+    mocks.provider.plan.mockResolvedValue(planned);
+
+    const result = await migratePlanCommand(runtime, {
+      provider: "codex",
+      json: true,
+    });
+
+    expect(result).toBe(planned);
+    expect(mocks.withProgress).not.toHaveBeenCalled();
   });
 
   it("passes --verify-plugin-apps into Codex apply planning and apply contexts", async () => {
@@ -1200,6 +1235,7 @@ describe("migrateApplyCommand", () => {
     await migrateDefaultCommand(jsonRuntime, { provider: "hermes", yes: true, json: true });
 
     expect(logs).toHaveLength(1);
+    expect(mocks.withProgress).not.toHaveBeenCalled();
     const logPayload = JSON.parse(logs[0] ?? "{}") as {
       backupPath?: unknown;
       items?: Array<{
@@ -1270,6 +1306,7 @@ describe("migrateApplyCommand", () => {
     await migrateDefaultCommand(runtime, { provider: "hermes", yes: true });
 
     expect(mocks.provider.plan).toHaveBeenCalledTimes(1);
+    expect(mocks.withProgress).toHaveBeenCalledTimes(2);
     expect(typeof mocks.provider.apply.mock.calls[0]?.[0]).toBe("object");
     expect(mocks.provider.apply.mock.calls[0]?.[1]).toBe(planned);
   });
