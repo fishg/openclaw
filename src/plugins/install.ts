@@ -1184,6 +1184,7 @@ async function validatePackagePluginInstallSource(params: {
         pluginId,
         logger: params.logger,
         extensions,
+        ...(packageMetadata ? { packageMetadata } : {}),
         requestKind: params.installPolicyRequest?.kind,
         requestedSpecifier: params.installPolicyRequest?.requestedSpecifier,
         mode: scanMode,

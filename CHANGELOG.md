@@ -20,6 +20,7 @@ Docs: https://docs.openclaw.ai
 - Session transcripts: redact sensitive message content in the centralized JSONL append path so CLI turns, gateway transcript injection, transcript mirrors, and guarded tool results use the same configured redaction behavior. Fixes #73565. Refs #73563. (#79645) Thanks @Ziy1-Tan.
 - Channels/iMessage: ignore Apple link-preview plugin payload attachments when users paste URLs, keeping the URL text while avoiding phantom media context. (#79374) Thanks @homer-byte.
 - Telegram: detect polling stalls from `getUpdates` liveness only, so outbound API calls no longer mask dead inbound polling; log polling-cycle starts after transport rebuilds. Fixes #78473.
+- fix: scan plugin runtime entries during install [AI]. (#80998) Thanks @pgondhi987.
 - fix(plugins): scan installed dependency runtime code [AI]. (#81066) Thanks @pgondhi987.
 - Inherit tool restrictions for delegated sessions [AI]. (#80979) Thanks @pgondhi987.
 - Telegram: discard legacy long-poll update offsets that cannot be tied to the current bot token, so token rotation no longer leaves bots silently skipping new messages. (#80671) Thanks @sxxtony.
