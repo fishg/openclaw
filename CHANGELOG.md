@@ -14,6 +14,8 @@ Docs: https://docs.openclaw.ai
 - Build: skip copied metadata for bundled plugins that are excluded from build entries, preventing update/status rebuilds from advertising missing QQ Bot runtime files. (#80925)
 - Control UI/sessions: nest subagent sessions under their parent session in the session picker dropdown using a visual `└─ ` prefix, making the parent-child relationship clear. Fixes #77628. (#78623) Thanks @chinar-amrutkar.
 - Auto-reply: surface a visible error when the configured model backend fails and fallback produces no visible reply, while preserving intentional silent turns and side-effect-only deliveries. (#80917) Thanks @dutifulbob.
+- Agents/exec: skip redundant heartbeat wake-ups for subagent session exec completions, preventing spurious LLM invocations on parent sessions. Fixes #66748. (#66749) Thanks @ggzeng.
+- Provider streams: keep OpenAI-compatible SSE and JSON fallback streams draining across split chunks and fail Azure Responses streams with a bounded first-event diagnostic instead of stalling. Refs #80926. (#80927) Thanks @galiniliev and @CaptainTimon.
 
 ### Changes
 
