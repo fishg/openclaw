@@ -29,9 +29,9 @@ describe("plugin registry runtime config scope", () => {
     } as unknown as Awaited<ReturnType<PluginRuntime["config"]["replaceConfigFile"]>>;
     const configRuntime = {
       current: vi.fn(() => config),
-      mutateConfigFile: async <T = void>() => ({
+      mutateConfigFile: async () => ({
         ...replaceResult,
-        result: undefined as T | undefined,
+        result: undefined,
       }),
       replaceConfigFile: async () => replaceResult,
       loadConfig: vi.fn(() => {
