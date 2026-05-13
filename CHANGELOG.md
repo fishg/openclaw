@@ -6,6 +6,16 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- fix(plugins): scan installed dependency runtime code [AI]. (#81066) Thanks @pgondhi987.
+- Inherit tool restrictions for delegated sessions [AI]. (#80979) Thanks @pgondhi987.
+- Telegram: discard legacy long-poll update offsets that cannot be tied to the current bot token, so token rotation no longer leaves bots silently skipping new messages. (#80671) Thanks @sxxtony.
+- browser: enforce navigation checks for act interactions [AI]. (#81070) Thanks @pgondhi987.
+- Validate node exec event provenance [AI]. (#81071) Thanks @pgondhi987.
+- Limit hook CLI tool authority [AI]. (#81065) Thanks @pgondhi987.
+- Require admin scope for node device token management [AI]. (#81067) Thanks @pgondhi987.
+- Restrict chat sender allowlist matching [AI]. (#80898) Thanks @pgondhi987.
+- Update: suppress the false newer-config warning during restart health probing after an update handoff, while keeping future-version mutation guards intact. (#78652)
+- Sessions: redact persisted tool result detail metadata before writing transcripts so diagnostic secrets do not survive tool output redaction. (#80444) Thanks @nimbleenigma.
 - Codex runtime: allow the official installed `@openclaw/codex` package to use its private task-runtime SDK helper, fixing `MODULE_NOT_FOUND` during migrated OpenAI/Codex beta runs.
 - Codex migration: make Enter activate the highlighted checkbox row before continuing, so `Skip for now` and bulk-selection rows work even when planned items start preselected.
 - Codex harness: keep auth-profile-backed media tools such as `image_generate` available when OpenAI auth lives in the agent's auth-profile store instead of environment variables.

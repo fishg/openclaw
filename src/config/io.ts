@@ -877,6 +877,7 @@ export type ConfigIoDeps = {
   configPath?: string;
   logger?: Pick<typeof console, "error" | "warn">;
   measure?: ConfigSnapshotReadMeasure;
+  suppressFutureVersionWarning?: boolean;
 };
 
 function warnOnConfigMiskeys(raw: unknown, logger: Pick<typeof console, "warn">): void {
@@ -943,6 +944,7 @@ function normalizeDeps(overrides: ConfigIoDeps = {}): Required<ConfigIoDeps> {
     configPath: overrides.configPath ?? "",
     logger: overrides.logger ?? console,
     measure: overrides.measure ?? (async (_name, run) => await run()),
+    suppressFutureVersionWarning: overrides.suppressFutureVersionWarning ?? false,
   };
 }
 
@@ -1616,7 +1618,9 @@ export function createConfigIO(
           .join("\n");
         deps.logger.warn(`Config warnings:\n${details}`);
       }
-      warnIfConfigFromFuture(validated.config, deps.logger);
+      if (!deps.suppressFutureVersionWarning) {
+        warnIfConfigFromFuture(validated.config, deps.logger);
+      }
       const cfg = retainRuntimeOnlyShippedPluginInstallConfigRecords(
         materializeRuntimeConfig(validated.config, "load", {
           manifestRegistry: pluginMetadataSnapshot?.manifestRegistry,
@@ -1823,7 +1827,9 @@ export function createConfigIO(
         });
       }
 
-      warnIfConfigFromFuture(validated.config, deps.logger);
+      if (!deps.suppressFutureVersionWarning) {
+        warnIfConfigFromFuture(validated.config, deps.logger);
+      }
       const snapshotConfig = await deps.measure("config.snapshot.read.materialize", () =>
         retainRuntimeOnlyShippedPluginInstallConfigRecords(
           materializeRuntimeConfig(validated.config, "snapshot", {
