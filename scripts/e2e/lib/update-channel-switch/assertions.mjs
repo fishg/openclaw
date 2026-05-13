@@ -87,6 +87,13 @@ function writeWorkspacePnpmConfig(file, keptPatches) {
     lines[allowUnusedIndex] = "allowUnusedPatches: true";
   }
 
+  const resolutionModeIndex = lines.findIndex((line) => /^resolutionMode:\s*/.test(line));
+  if (resolutionModeIndex === -1) {
+    lines.push("resolutionMode: highest");
+  } else {
+    lines[resolutionModeIndex] = "resolutionMode: highest";
+  }
+
   fs.writeFileSync(file, `${lines.join("\n")}${hadTrailingNewline ? "\n" : ""}`);
 }
 
@@ -128,6 +135,7 @@ function prepareGitFixture(root) {
     writeWorkspacePnpmConfig(pnpmWorkspacePath, keptPatches);
   } else {
     pnpmConfig.allowUnusedPatches = true;
+    pnpmConfig.resolutionMode = "highest";
     if (Object.keys(keptPatches).length > 0) {
       pnpmConfig.patchedDependencies = keptPatches;
     } else {
