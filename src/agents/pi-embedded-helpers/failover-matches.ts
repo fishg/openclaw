@@ -168,6 +168,7 @@ const ERROR_PATTERNS = {
     // aborted). These arrive as bare strings on the outer error and, without
     // an explicit match, the fallback chain is never attempted (#69368).
     /^terminated$/i,
+    /^stream_read_error$/i,
     /\bund_err_(?:socket|connect|headers?|body|req_content_length_mismatch|aborted|closed)\b/i,
     // pi-ai's openai-codex provider surfaces `Request failed` when the HTTP
     // response has no body and no status text (typical of Cloudflare 502s
@@ -220,6 +221,12 @@ const ERROR_PATTERNS = {
     /unexpected token .* in json at position \d+/i,
     /expected ['\",}\]]+.* in json at position \d+/i,
     /tool call id was.*must be/i,
+    // Prefill-strict models (e.g. claude-opus-4-7) reject requests that end
+    // with an assistant turn. The lane must not re-queue these — the same
+    // payload will fail identically on every retry, causing an infinite loop
+    // (#79688).
+    "does not support assistant message prefill",
+    "conversation must end with a user message",
   ],
 } as const;
 

@@ -1,4 +1,9 @@
-import { getRuntimeConfig, readConfigFileSnapshot, replaceConfigFile } from "../config/config.js";
+import {
+  assertConfigWriteAllowedInCurrentMode,
+  getRuntimeConfig,
+  readConfigFileSnapshot,
+  replaceConfigFile,
+} from "../config/config.js";
 import { updateNpmInstalledHookPacks } from "../hooks/update.js";
 import {
   loadInstalledPluginIndexInstallRecords,
@@ -8,6 +13,7 @@ import {
 import { updateNpmInstalledPlugins } from "../plugins/update.js";
 import { defaultRuntime } from "../runtime.js";
 import { theme } from "../terminal/theme.js";
+import { resolveClawHubRiskAcknowledgementCliOptions } from "./clawhub-risk-acknowledgement.js";
 import { commitPluginInstallRecordsWithConfig } from "./plugins-install-record-commit.js";
 import { refreshPluginRegistryAfterConfigMutation } from "./plugins-registry-refresh.js";
 import { logPluginUpdateOutcomes } from "./plugins-update-outcomes.js";
@@ -19,8 +25,15 @@ import { promptYesNo } from "./prompt.js";
 
 export async function runPluginUpdateCommand(params: {
   id?: string;
-  opts: { all?: boolean; dryRun?: boolean; dangerouslyForceUnsafeInstall?: boolean };
+  opts: {
+    all?: boolean;
+    acknowledgeClawHubRisk?: boolean;
+    dryRun?: boolean;
+    dangerouslyForceUnsafeInstall?: boolean;
+  };
 }) {
+  assertConfigWriteAllowedInCurrentMode();
+
   const sourceSnapshotPromise = readConfigFileSnapshot().catch(() => null);
   const cfg = getRuntimeConfig();
   const pluginInstallRecords = await loadInstalledPluginIndexInstallRecords();
@@ -55,6 +68,10 @@ export async function runPluginUpdateCommand(params: {
     specOverrides: pluginSelection.specOverrides,
     dryRun: params.opts.dryRun,
     dangerouslyForceUnsafeInstall: params.opts.dangerouslyForceUnsafeInstall,
+    ...resolveClawHubRiskAcknowledgementCliOptions({
+      acknowledgeClawHubRisk: params.opts.acknowledgeClawHubRisk,
+      action: "updating",
+    }),
     logger,
     onIntegrityDrift: async (drift) => {
       const specLabel = drift.resolvedSpec ?? drift.spec;

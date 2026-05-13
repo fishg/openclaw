@@ -4,6 +4,14 @@ import { resolveRequestUrl } from "./request-url.js";
 
 const asFetch = (fn: unknown): typeof fetch => fn as typeof fetch;
 
+function fetchCall(fetchFn: ReturnType<typeof vi.fn>, index: number): [unknown, RequestInit?] {
+  const call = fetchFn.mock.calls[index];
+  if (!call) {
+    throw new Error(`expected fetch call ${index}`);
+  }
+  return call as [unknown, RequestInit?];
+}
+
 describe("fetchWithBearerAuthScopeFallback", () => {
   it("rejects non-https urls when https is required", async () => {
     await expect(
@@ -85,7 +93,7 @@ describe("fetchWithBearerAuthScopeFallback", () => {
       if (expectedAuthHeader === null) {
         return;
       }
-      const secondCallInit = fetchFn.mock.calls.at(1)?.[1] as RequestInit | undefined;
+      const secondCallInit = fetchCall(fetchFn, 1)[1];
       const secondHeaders = new Headers(secondCallInit?.headers);
       expect(secondHeaders.get("authorization")).toBe(expectedAuthHeader);
     },
@@ -125,7 +133,8 @@ describe("fetchWithBearerAuthScopeFallback", () => {
       enumerable: false,
     });
     const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
-      expect(() => new Headers(init?.headers)).not.toThrow();
+      const normalizedHeaders = new Headers(init?.headers);
+      expect(normalizedHeaders.get("accept")).toBe("application/json");
       return fetchFn.mock.calls.length === 1
         ? new Response("unauthorized", { status: 401 })
         : new Response("ok", { status: 200 });
@@ -142,8 +151,10 @@ describe("fetchWithBearerAuthScopeFallback", () => {
 
     expect(response.status).toBe(200);
     expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(Object.getOwnPropertySymbols(fetchFn.mock.calls[0]?.[1]?.headers as object)).toEqual([]);
-    expect(new Headers(fetchFn.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+    expect(Object.getOwnPropertySymbols(fetchCall(fetchFn, 0)[1]?.headers as object)).toStrictEqual(
+      [],
+    );
+    expect(new Headers(fetchCall(fetchFn, 1)[1]?.headers).get("authorization")).toBe(
       "Bearer token-1",
     );
     expect(Object.getOwnPropertySymbols(headers)).toHaveLength(1);

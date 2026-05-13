@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { describe, expect, it } from "vitest";
 import {
   collectDiscordMissingEnvTokenWarnings,
@@ -8,13 +8,19 @@ import {
   scanDiscordNumericIdEntries,
 } from "./doctor.js";
 
+function getDiscordCompatibilityNormalizer(): NonNullable<
+  typeof discordDoctor.normalizeCompatibilityConfig
+> {
+  const normalize = discordDoctor.normalizeCompatibilityConfig;
+  if (!normalize) {
+    throw new Error("Expected discord doctor to expose normalizeCompatibilityConfig");
+  }
+  return normalize;
+}
+
 describe("discord doctor", () => {
   it("normalizes legacy discord streaming aliases for runtime config", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const result = normalize({
       cfg: {
@@ -114,11 +120,7 @@ describe("discord doctor", () => {
   });
 
   it("moves account voice.tts.edge into providers.microsoft", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const result = normalize({
       cfg: {
@@ -155,11 +157,7 @@ describe("discord doctor", () => {
   });
 
   it("moves legacy guild channel allow toggles into enabled", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const result = normalize({
       cfg: {
@@ -207,11 +205,7 @@ describe("discord doctor", () => {
   });
 
   it("moves legacy guild channel agentId into a top-level route binding", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const result = normalize({
       cfg: {
@@ -251,11 +245,7 @@ describe("discord doctor", () => {
   });
 
   it("moves account-scoped guild channel agentId into an account-scoped route binding", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const result = normalize({
       cfg: {
@@ -285,7 +275,7 @@ describe("discord doctor", () => {
     ]);
     expect(
       result.config.channels?.discord?.accounts?.work?.guilds?.["100"]?.channels?.["200"],
-    ).toEqual({});
+    ).toStrictEqual({});
     expect(result.config.bindings).toEqual([
       { agentId: "main", match: { channel: "discord" } },
       {
@@ -301,11 +291,7 @@ describe("discord doctor", () => {
   });
 
   it("removes legacy guild channel agentId when a matching route binding already exists", () => {
-    const normalize = discordDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      return;
-    }
+    const normalize = getDiscordCompatibilityNormalizer();
 
     const existingBinding = {
       agentId: "video",
@@ -337,7 +323,7 @@ describe("discord doctor", () => {
     expect(result.changes).toEqual([
       "Removed channels.discord.guilds.100.channels.200.agentId; a matching top-level bindings[] route already exists for Discord channel 200.",
     ]);
-    expect(result.config.channels?.discord?.guilds?.["100"]?.channels?.["200"]).toEqual({});
+    expect(result.config.channels?.discord?.guilds?.["100"]?.channels?.["200"]).toStrictEqual({});
     expect(result.config.bindings).toEqual([existingBinding]);
   });
 
@@ -388,7 +374,7 @@ describe("discord doctor", () => {
     expect(result.config.channels?.discord?.guilds?.main?.users).toEqual(["111"]);
     expect(result.config.channels?.discord?.guilds?.main?.roles).toEqual(["222"]);
     expect(result.changes).not.toHaveLength(0);
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings).toStrictEqual([]);
   });
 
   it("formats repair guidance for unsafe numeric ids", () => {
@@ -410,19 +396,21 @@ describe("discord doctor", () => {
       },
     } as unknown as OpenClawConfig;
 
-    expect(collectDiscordMissingEnvTokenWarnings({ cfg, env: {} })).toEqual([
-      expect.stringContaining("DISCORD_BOT_TOKEN is absent"),
+    const missingTokenWarning =
+      "- channels.discord: default account has no available bot token, and DISCORD_BOT_TOKEN is absent in this doctor environment. After migration, verify DISCORD_BOT_TOKEN is present in the state-dir .env or configure channels.discord.token / channels.discord.accounts.default.token as a SecretRef.";
+    expect(collectDiscordMissingEnvTokenWarnings({ cfg, env: {} })).toStrictEqual([
+      missingTokenWarning,
     ]);
     expect(
       collectDiscordMissingEnvTokenWarnings({ cfg, env: { DISCORD_BOT_TOKEN: "Bot tok" } }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
     expect(
       await discordDoctor.collectPreviewWarnings?.({
         cfg,
         doctorFixCommand: "openclaw doctor --fix",
         env: {},
       }),
-    ).toEqual([expect.stringContaining("DISCORD_BOT_TOKEN is absent")]);
+    ).toStrictEqual([missingTokenWarning]);
   });
 
   it("does not warn about DISCORD_BOT_TOKEN when a non-default account is selected", () => {
@@ -438,6 +426,6 @@ describe("discord doctor", () => {
       },
     } as unknown as OpenClawConfig;
 
-    expect(collectDiscordMissingEnvTokenWarnings({ cfg, env: {} })).toEqual([]);
+    expect(collectDiscordMissingEnvTokenWarnings({ cfg, env: {} })).toStrictEqual([]);
   });
 });

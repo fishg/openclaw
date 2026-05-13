@@ -2,15 +2,14 @@ import {
   firstDefined,
   isSenderIdAllowed,
   mergeDmAllowFromSources,
-  type AllowlistMatch,
 } from "openclaw/plugin-sdk/allow-from";
-import {
-  parseAccessGroupAllowFromEntry,
-  resolveAccessGroupAllowFromMatches,
-} from "openclaw/plugin-sdk/command-auth";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type {
+  DmPolicy,
+  TelegramDirectConfig,
+  TelegramGroupConfig,
+} from "openclaw/plugin-sdk/config-contracts";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export type NormalizedAllowFrom = {
   entries: string[];
@@ -18,8 +17,6 @@ export type NormalizedAllowFrom = {
   hasEntries: boolean;
   invalidEntries: string[];
 };
-
-type AllowFromMatch = AllowlistMatch<"wildcard" | "id">;
 
 const warnedInvalidEntries = new Set<string>();
 const log = createSubsystemLogger("telegram/bot-access");
@@ -72,6 +69,17 @@ export const normalizeDmAllowFromWithStore = (params: {
   dmPolicy?: string;
 }): NormalizedAllowFrom => normalizeAllowFrom(mergeDmAllowFromSources(params));
 
+export function resolveTelegramEffectiveDmPolicy(params: {
+  isGroup: boolean;
+  groupConfig?: TelegramDirectConfig | TelegramGroupConfig;
+  dmPolicy?: DmPolicy;
+}): DmPolicy {
+  if (!params.isGroup && params.groupConfig && "dmPolicy" in params.groupConfig) {
+    return params.groupConfig.dmPolicy ?? params.dmPolicy ?? "pairing";
+  }
+  return params.dmPolicy ?? "pairing";
+}
+
 export const isSenderAllowed = (params: {
   allow: NormalizedAllowFrom;
   senderId?: string;
@@ -115,21 +123,3 @@ export async function expandTelegramAllowFromWithAccessGroups(params: {
 }
 
 export { firstDefined };
-
-export const resolveSenderAllowMatch = (params: {
-  allow: NormalizedAllowFrom;
-  senderId?: string;
-  senderUsername?: string;
-}): AllowFromMatch => {
-  const { allow, senderId } = params;
-  if (allow.hasWildcard) {
-    return { allowed: true, matchKey: "*", matchSource: "wildcard" };
-  }
-  if (!allow.hasEntries) {
-    return { allowed: false };
-  }
-  if (senderId && allow.entries.includes(senderId)) {
-    return { allowed: true, matchKey: senderId, matchSource: "id" };
-  }
-  return { allowed: false };
-};

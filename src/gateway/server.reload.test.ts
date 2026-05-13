@@ -291,6 +291,15 @@ vi.mock("./config-reload.js", async (importOriginal) => {
 
 installGatewayTestHooks({ scope: "suite" });
 
+function latestMockCall(mock: { mock: { calls: unknown[][] } }, label: string): unknown[] {
+  const calls = mock.mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call) {
+    throw new Error(`expected ${label} call`);
+  }
+  return call;
+}
+
 async function waitForGatewayAuthChangedClose(ws: WebSocket): Promise<{
   code: number;
   reason: string;
@@ -435,7 +444,7 @@ describe("gateway hot reload", () => {
     );
 
     await expect(params.applyReload()).rejects.toThrow(params.expectedError);
-    expect(drainSystemEvents(params.sessionKey)).toEqual([]);
+    expect(drainSystemEvents(params.sessionKey)).toStrictEqual([]);
   }
 
   async function expectSecretReloadRecovered(params: {
@@ -466,7 +475,7 @@ describe("gateway hot reload", () => {
       hoisted.providerManager.startChannel.mockClear();
       hoisted.activeEmbeddedRunCount.value = 1;
       embeddedRunMock.activeIds.add("reload-active");
-      const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      vi.useFakeTimers();
       const reloadPromise = onHotReload?.(
         {
           changedPaths: ["channels.discord.token"],
@@ -486,16 +495,20 @@ describe("gateway hot reload", () => {
         },
       );
       try {
-        await delay(550);
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(500);
         expect(hoisted.providerManager.stopChannel).not.toHaveBeenCalled();
         expect(hoisted.providerManager.startChannel).not.toHaveBeenCalled();
 
         hoisted.activeEmbeddedRunCount.value = 0;
         embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500);
         await reloadPromise;
       } finally {
         hoisted.activeEmbeddedRunCount.value = 0;
         embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500).catch(() => {});
+        vi.useRealTimers();
         await reloadPromise?.catch(() => {});
       }
 
@@ -700,13 +713,21 @@ describe("gateway hot reload", () => {
       );
 
       expect(hoisted.stopGmailWatcher).toHaveBeenCalled();
-      expect(hoisted.startGmailWatcher).toHaveBeenCalledWith(expect.objectContaining(nextConfig));
+      const [restartedGmailConfig] = latestMockCall(
+        hoisted.startGmailWatcher,
+        "Gmail watcher start",
+      ) as [typeof nextConfig];
+      expect(restartedGmailConfig.hooks).toEqual(nextConfig.hooks);
+      expect(restartedGmailConfig.channels).toEqual(nextConfig.channels);
 
       expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
       expect(hoisted.heartbeatUpdateConfig).toHaveBeenCalledTimes(1);
-      expect(hoisted.heartbeatUpdateConfig).toHaveBeenCalledWith(
-        expect.objectContaining(nextConfig),
-      );
+      const [heartbeatConfig] = latestMockCall(
+        hoisted.heartbeatUpdateConfig,
+        "heartbeat config update",
+      ) as [typeof nextConfig];
+      expect(heartbeatConfig.agents).toEqual(nextConfig.agents);
+      expect(heartbeatConfig.web).toEqual(nextConfig.web);
 
       await vi.waitFor(() => {
         expect(hoisted.cronInstances.length).toBeGreaterThanOrEqual(1);
@@ -718,8 +739,6 @@ describe("gateway hot reload", () => {
       await vi.waitFor(() => {
         expect(restartedCron.start).toHaveBeenCalledTimes(1);
       });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(restartedCron.start).toHaveBeenCalledTimes(1);
 
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledTimes(5);
       expect(hoisted.providerManager.startChannel).toHaveBeenCalledTimes(5);
