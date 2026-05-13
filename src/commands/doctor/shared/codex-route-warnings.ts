@@ -39,38 +39,6 @@ type CodexSessionRouteRepairSummary = {
   changes: string[];
 };
 
-type CodexRepairRuntime = "codex" | "pi";
-type CodexRouteRepairPlan = {
-  runtime: CodexRepairRuntime;
-  rewriteCodexRoutes: boolean;
-  recoverBrokenPiRoutes: boolean;
-  warnBrokenPiRoutes: boolean;
-  hasUsableCodexOAuth: boolean;
-  hasUsableOpenAIAuth: boolean;
-};
-type CodexSessionRouteRepairMode = "rewrite-to-openai" | "recover-codex-oauth" | "preserve";
-type MutableRecord = Record<string, unknown>;
-type SessionRouteRepairResult = {
-  changed: boolean;
-  sessionKeys: string[];
-};
-type CodexSessionRouteRepairSummary = {
-  scannedStores: number;
-  repairedStores: number;
-  repairedSessions: number;
-  warnings: string[];
-  changes: string[];
-};
-
-const RECOVERABLE_CODEX_OAUTH_PI_MODEL_IDS = new Set([
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.4-nano",
-  "gpt-5.4-pro",
-  "gpt-5.5",
-  "gpt-5.5-pro",
-]);
-
 function normalizeString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : undefined;
 }
@@ -88,30 +56,6 @@ function asAgentRuntimePolicyConfig(value: unknown): AgentRuntimePolicyConfig | 
 
 function isOpenAICodexModelRef(model: string | undefined): model is string {
   return normalizeString(model)?.startsWith("openai-codex/") === true;
-}
-
-function toCanonicalOpenAIModelRef(model: string): string | undefined {
-  if (!isOpenAICodexModelRef(model)) {
-    return undefined;
-  }
-  const modelId = model.slice("openai-codex/".length).trim();
-  return modelId ? `openai/${modelId}` : undefined;
-}
-
-function toOpenAIModelId(model: string): string | undefined {
-  if (!isOpenAICodexModelRef(model)) {
-    return undefined;
-  }
-  const modelId = model.slice("openai-codex/".length).trim();
-  return modelId || undefined;
-}
-
-function toOpenAICodexModelRef(model: string): string | undefined {
-  if (!isRecoverableOpenAIModelRef(model)) {
-    return undefined;
-  }
-  const modelId = model.slice("openai/".length).trim();
-  return modelId ? `openai-codex/${modelId}` : undefined;
 }
 
 function toCanonicalOpenAIModelRef(model: string): string | undefined {

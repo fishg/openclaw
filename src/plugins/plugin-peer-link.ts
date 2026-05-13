@@ -323,25 +323,3 @@ export async function auditOpenClawPeerDependenciesInManagedNpmRoot(params: {
   }
   return { checked, broken: issues.length, issues };
 }
-
-export async function relinkOpenClawPeerDependenciesInManagedNpmRoot(params: {
-  npmRoot: string;
-  logger: PluginPeerLinkLogger;
-}): Promise<RelinkManagedNpmRootResult> {
-  let checked = 0;
-  let attempted = 0;
-  for (const packageDir of await listManagedNpmRootPackageDirs(params.npmRoot)) {
-    const peerDependencies = await readPackagePeerDependencies(packageDir);
-    if (!Object.hasOwn(peerDependencies, "openclaw")) {
-      continue;
-    }
-    checked += 1;
-    await linkOpenClawPeerDependencies({
-      installedDir: packageDir,
-      peerDependencies,
-      logger: params.logger,
-    });
-    attempted += 1;
-  }
-  return { checked, attempted };
-}

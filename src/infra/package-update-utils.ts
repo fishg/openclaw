@@ -67,24 +67,3 @@ export function installedPackageNeedsOpenClawPeerLinkRepair(dir: string): boolea
     return code === "ENOENT" || code === "ENOTDIR";
   }
 }
-
-export async function readInstalledPackageVersion(dir: string): Promise<string | undefined> {
-  const manifest = readInstalledPackageManifest(dir);
-  return typeof manifest?.version === "string" ? manifest.version : undefined;
-}
-
-export function installedPackageNeedsOpenClawPeerLinkRepair(dir: string): boolean {
-  const manifest = readInstalledPackageManifest(dir);
-  const peerDependencies = isRecord(manifest?.peerDependencies) ? manifest.peerDependencies : {};
-  if (!Object.hasOwn(peerDependencies, "openclaw")) {
-    return false;
-  }
-
-  try {
-    fsSync.statSync(path.join(dir, "node_modules", "openclaw"));
-    return false;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException | undefined)?.code;
-    return code === "ENOENT" || code === "ENOTDIR";
-  }
-}

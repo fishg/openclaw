@@ -2273,10 +2273,6 @@ export async function runAgentTurnWithFallback(params: {
         ? sanitizeUserFacingText(message, { errorContext: true })
         : message;
       const trimmedMessage = safeMessage.replace(/\.\s*$/, "");
-      const fallbackSummaryFailureText =
-        !isBilling && !isRateLimit && !rateLimitOrOverloadedCopy && !shouldSurfaceToControlUi
-          ? buildFallbackSummaryFailureText(err)
-          : null;
       const externalRunFailureReply =
         !isBilling &&
         !(isRateLimit && !isOverloadedErrorMessage(message)) &&
@@ -2284,14 +2280,9 @@ export async function runAgentTurnWithFallback(params: {
         !isContextOverflow &&
         !isRoleOrderingError &&
         !shouldSurfaceToControlUi
-          ? fallbackSummaryFailureText
-            ? {
-                text: fallbackSummaryFailureText,
-                isGenericRunnerFailure: false,
-              }
-            : buildExternalRunFailureReply(message, {
-                includeDetails: isVerboseFailureDetailEnabled(params.resolvedVerboseLevel),
-              })
+          ? buildExternalRunFailureReply(message, {
+              includeDetails: isVerboseFailureDetailEnabled(params.resolvedVerboseLevel),
+            })
           : undefined;
       const fallbackText = isBilling
         ? BILLING_ERROR_USER_MESSAGE

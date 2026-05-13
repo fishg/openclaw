@@ -336,10 +336,9 @@ export function installContextEngineLoopHook(params: {
       });
       if (assembled && Array.isArray(assembled.messages) && assembled.messages !== sourceMessages) {
         lastAssembledView = assembled.messages;
-        lastAssembledFromSourceLength = sourceMessages.length;
         return assembled.messages;
       }
-      clearAssembledCache();
+      lastAssembledView = null;
     } catch {
       // Best-effort: any engine failure falls through to the raw source
       // messages so the tool loop still makes forward progress.

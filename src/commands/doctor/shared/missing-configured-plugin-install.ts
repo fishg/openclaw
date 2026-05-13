@@ -494,36 +494,6 @@ function recordClawHubPackageName(value: string | undefined): string | undefined
   return parseClawHubPluginSpec(trimmed)?.name ?? trimmed;
 }
 
-function resolveVersionAlignedOfficialNpmSpec(
-  candidate: DownloadableInstallCandidate,
-): string | undefined {
-  const npmSpec = candidate.npmSpec?.trim();
-  if (!npmSpec || !candidate.trustedSourceLinkedOfficialInstall) {
-    return npmSpec;
-  }
-  const parsed = parseRegistryNpmSpec(npmSpec);
-  if (!parsed || !parsed.name.startsWith("@openclaw/")) {
-    return npmSpec;
-  }
-  if (parsed.selectorKind === "exact-version") {
-    return npmSpec;
-  }
-  const hostVersion = VERSION.trim();
-  if (!isExactSemverVersion(hostVersion)) {
-    return npmSpec;
-  }
-  if (isPrereleaseSemverVersion(hostVersion)) {
-    const prerelease = /^[0-9]+\.[0-9]+\.[0-9]+-([0-9A-Za-z._-]+)(?:\+.*)?$/u.exec(
-      hostVersion,
-    )?.[1];
-    const prereleaseTag = prerelease?.split(/[.-]/u)[0];
-    return prereleaseTag && /^[A-Za-z][A-Za-z0-9._-]*$/u.test(prereleaseTag)
-      ? `${parsed.name}@${prereleaseTag}`
-      : npmSpec;
-  }
-  return `${parsed.name}@${hostVersion}`;
-}
-
 async function installCandidate(params: {
   candidate: DownloadableInstallCandidate;
   records: Record<string, PluginInstallRecord>;
