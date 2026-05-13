@@ -128,6 +128,7 @@ import {
   withPluginRuntimePluginIdScope,
   withPluginRuntimePluginScope,
 } from "./runtime/gateway-request-scope.js";
+import { createPluginScopedRuntimeConfig } from "./runtime/runtime-config.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import { validateJsonSchemaValue, type JsonSchemaValue } from "./schema-validator.js";
 import { normalizeSessionEntrySlotKey } from "./session-entry-slot-keys.js";
@@ -2396,13 +2397,10 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
           } satisfies PluginRuntime["state"];
         }
         if (prop === "config") {
-          const config = Reflect.get(target, prop, receiver);
-          return {
-            ...config,
-            loadConfig: () => runWithPluginScope(() => config.loadConfig()),
-            writeConfigFile: (cfg, options) =>
-              runWithPluginScope(() => config.writeConfigFile(cfg, options)),
-          } satisfies PluginRuntime["config"];
+          return createPluginScopedRuntimeConfig(
+            Reflect.get(target, prop, receiver),
+            runWithPluginScope,
+          );
         }
         if (prop === "llm") {
           const llm = Reflect.get(target, prop, receiver);
