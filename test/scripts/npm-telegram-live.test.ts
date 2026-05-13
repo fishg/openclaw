@@ -47,6 +47,9 @@ describe("package Telegram live Docker E2E", () => {
     expect(script).toContain('"${docker_env[@]}"');
     expect(script).toContain('if [ -z "$credential_role" ] && [ -n "${CI:-}" ]');
     expect(script).toContain('credential_role="ci"');
+    expect(script).toContain('run_log="$host_output_dir/npm-telegram-live.log"');
+    expect(script).toContain('tee -a "$run_log"');
+    expect(script).toContain('OPENCLAW_QA_SUITE_PROGRESS="${OPENCLAW_QA_SUITE_PROGRESS:-1}"');
   });
 
   it("can install a resolved package tarball instead of a registry spec", () => {
