@@ -6,6 +6,18 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Anthropic: reseed Claude CLI fresh-session retries from bounded OpenClaw transcript history after session rotation, preventing conversation amnesia. Fixes #80905. (#80934) Thanks @bitloi.
+- Require explicit browser device pairing [AI]. (#81289) Thanks @pgondhi987.
+- Require Control UI pairing before proxy-scoped access [AI]. (#81288) Thanks @pgondhi987.
+- Installer: honor `--version` for git installs and install from the checked-in lockfile, preventing recent dependency pins from tripping pnpm's minimum-release-age gate during tag installs.
+- Harden trusted-proxy source validation [AI]. (#81290) Thanks @pgondhi987.
+- Agents: add permissive item schemas to array tool parameters before provider submission, preventing OpenAI-compatible schema validation from rejecting plugin tools that omit `items`. Fixes #81175. (#81217) Thanks @JARVIS-Glasses.
+- Agents: escalate LLM idle watchdog timeouts through profile rotation and configured model fallback instead of leaving agent turns stuck after a silent model stream. Fixes #76877. (#80449) Thanks @jimdawdy-hub.
+- Discord voice: treat OpenAI Realtime startup auth failures as fatal, suppress duplicate realtime error logs, and stop autoJoin from retrying the same broken voice channel until credentials are fixed.
+- ACPX: stop forwarding unsupported timeout config options to Claude ACP while preserving OpenClaw's own turn timeout. (#80812) Thanks @sxxtony.
+- Session transcripts: redact sensitive message content in the centralized JSONL append path so CLI turns, gateway transcript injection, transcript mirrors, and guarded tool results use the same configured redaction behavior. Fixes #73565. Refs #73563. (#79645) Thanks @Ziy1-Tan.
+- Channels/iMessage: ignore Apple link-preview plugin payload attachments when users paste URLs, keeping the URL text while avoiding phantom media context. (#79374) Thanks @homer-byte.
+- Telegram: detect polling stalls from `getUpdates` liveness only, so outbound API calls no longer mask dead inbound polling; log polling-cycle starts after transport rebuilds. Fixes #78473.
 - fix(plugins): scan installed dependency runtime code [AI]. (#81066) Thanks @pgondhi987.
 - Inherit tool restrictions for delegated sessions [AI]. (#80979) Thanks @pgondhi987.
 - Telegram: discard legacy long-poll update offsets that cannot be tied to the current bot token, so token rotation no longer leaves bots silently skipping new messages. (#80671) Thanks @sxxtony.
