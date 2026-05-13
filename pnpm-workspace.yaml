@@ -29,6 +29,7 @@ minimumReleaseAgeExclude:
   - "@rolldown/*"
   - "@oxlint/*"
   - "@oxfmt/*"
+  - "oxlint"
   - "oxfmt"
   - "axios@1.15.0"
   - "discord-api-types"
