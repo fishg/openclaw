@@ -62,6 +62,7 @@ const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
 const AGENT_MEDIATED_COMPLETION_TOOLS = new Set(["music_generate", "video_generate"]);
 
 type SubagentAnnounceDeliveryDeps = {
+  callGateway: typeof callGateway;
   dispatchGatewayMethodInProcess: typeof dispatchGatewayMethodInProcess;
   getRuntimeConfig: typeof getRuntimeConfig;
   getRequesterSessionActivity: (requesterSessionKey: string) => {
@@ -72,6 +73,7 @@ type SubagentAnnounceDeliveryDeps = {
 };
 
 const defaultSubagentAnnounceDeliveryDeps: SubagentAnnounceDeliveryDeps = {
+  callGateway,
   dispatchGatewayMethodInProcess,
   getRuntimeConfig,
   getRequesterSessionActivity: (requesterSessionKey: string) => {
