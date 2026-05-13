@@ -151,6 +151,24 @@ const vllmProvider = {
 
 const defaultProviders = [chutesProvider, moonshotProvider, openaiProvider];
 
+function firstDiscoveryRequest(): {
+  onlyPluginIds?: string[];
+  requireCompleteDiscoveryEntryCoverage?: boolean;
+  discoveryEntriesOnly?: boolean;
+  includeUntrustedWorkspacePlugins?: boolean;
+} {
+  const call = providerDiscoveryMocks.resolveRuntimePluginDiscoveryProviders.mock.calls[0];
+  if (!call) {
+    throw new Error("expected runtime plugin discovery call");
+  }
+  return call[0] as {
+    onlyPluginIds?: string[];
+    requireCompleteDiscoveryEntryCoverage?: boolean;
+    discoveryEntriesOnly?: boolean;
+    includeUntrustedWorkspacePlugins?: boolean;
+  };
+}
+
 describe("loadProviderCatalogModelsForList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
