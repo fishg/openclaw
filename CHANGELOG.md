@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- CLI/plugins: keep bare plugin and parent-command help on the lightweight path, avoiding plugin registry discovery before rendering help.
 - CLI tables: preserve muted/color styling on wrapped continuation lines after multiline cells, keeping `openclaw plugins list` descriptions readable.
 - Codex harness: keep `oauthRef`-backed Codex OAuth profiles usable and stop high-confidence app-server OAuth refresh invalidation from retry-spamming raw token-refresh errors without turning entitlement or usage-limit payloads into re-auth prompts.
 - Codex harness: classify native app-server token-refresh logout and relogin failures as authentication refresh errors, so users get re-authentication guidance instead of a raw runtime failure.
