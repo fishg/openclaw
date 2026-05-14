@@ -250,6 +250,16 @@ describe("collectInstalledRootDependencyManifestErrors", () => {
         'import * as lark from "@larksuiteoapi/node-sdk";\nexport { lark };\n',
         "utf8",
       );
+      writeFileSync(
+        join(packageRoot, "dist", "externalized-slack-runtime.js"),
+        [
+          'import { App } from "@slack/bolt";',
+          'import { WebClient } from "@slack/web-api";',
+          "export { App, WebClient };",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
       mkdirSync(join(packageRoot, "dist", "plugin-sdk"), { recursive: true });
       writeFileSync(
         join(packageRoot, "dist", "plugin-sdk/channel-test-helpers.js"),

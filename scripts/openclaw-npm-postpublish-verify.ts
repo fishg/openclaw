@@ -69,6 +69,11 @@ const OPTIONAL_OR_EXTERNALIZED_RUNTIME_IMPORTS = new Set([
   // Discord voice decoder fallback. The root chunk catches missing decoders and the owning
   // Discord plugin remains externalized from the root package.
   "opusscript",
+  // Slack remains an official externalized channel plugin. Root dist can retain
+  // orphaned lazy chunks from the plugin build even though dist/extensions/slack
+  // is externalized from the root package scan.
+  "@slack/bolt",
+  "@slack/web-api",
   // Public plugin SDK contract helpers are intentionally test-only entrypoints.
   // Consumers importing them run under their own Vitest dev dependency.
   "vitest",
