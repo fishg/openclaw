@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/slack",
-  "version": "2026.5.12-beta.6",
+  "version": "2026.5.12-beta.7",
   "description": "OpenClaw Slack channel plugin",
   "repository": {
     "type": "git",
@@ -19,7 +19,7 @@
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.12-beta.6"
+    "openclaw": ">=2026.5.12-beta.7"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -63,10 +63,10 @@
       "minHostVersion": ">=2026.5.12-beta.6"
     },
     "compat": {
-      "pluginApi": ">=2026.5.12-beta.6"
+      "pluginApi": ">=2026.5.12-beta.7"
     },
     "build": {
-      "openclawVersion": "2026.5.12-beta.6"
+      "openclawVersion": "2026.5.12-beta.7"
     },
     "release": {
       "publishToClawHub": true,
