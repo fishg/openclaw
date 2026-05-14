@@ -14,6 +14,7 @@ describe("parseReleaseVerifyBetaArgs", () => {
       registry: "https://clawhub.ai",
       skipPostpublish: false,
       rerunFailedClawHub: false,
+      allowVerifiedClawHubRunFailure: false,
       workflowRuns: {},
     });
   });
@@ -31,10 +32,12 @@ describe("parseReleaseVerifyBetaArgs", () => {
         "33",
         "--skip-postpublish",
         "--rerun-failed-clawhub",
+        "--allow-verified-clawhub-run-failure",
       ]),
     ).toMatchObject({
       skipPostpublish: true,
       rerunFailedClawHub: true,
+      allowVerifiedClawHubRunFailure: true,
       workflowRuns: {
         openclawNpm: "11",
         pluginNpm: "22",

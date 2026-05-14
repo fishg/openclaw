@@ -443,15 +443,22 @@ jobs:
 
           async function fetchWithRetry(url, options = {}) {
             let lastStatus = "unknown";
+            let lastError;
             for (let attempt = 1; attempt <= 12; attempt += 1) {
-              const response = await fetch(url, { redirect: "manual", ...options });
-              lastStatus = response.status;
-              if (response.status !== 429 && response.status < 500) {
-                return response;
+              try {
+                const response = await fetch(url, { redirect: "manual", ...options });
+                lastStatus = response.status;
+                if (response.status !== 429 && response.status < 500) {
+                  return response;
+                }
+                lastError = new Error(`HTTP ${response.status}`);
+              } catch (error) {
+                lastError = error;
               }
               await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
             }
-            throw new Error(`${url} did not stabilize; last status ${lastStatus}.`);
+            const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+            throw new Error(`${url} did not stabilize; last status ${lastStatus}; last error ${errorMessage}.`);
           }
 
           const detailResponse = await fetchWithRetry(detailUrl, {
