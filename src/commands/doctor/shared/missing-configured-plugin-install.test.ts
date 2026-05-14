@@ -1284,6 +1284,20 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       {},
     ],
     [
+      "default selectable OpenAI agent model",
+      {
+        agents: {
+          defaults: {
+            model: { primary: "anthropic/claude-sonnet-4-6" },
+            models: {
+              "openai/gpt-5.5": {},
+            },
+          },
+        },
+      },
+      {},
+    ],
+    [
       "agent model runtime policy",
       {
         agents: {
