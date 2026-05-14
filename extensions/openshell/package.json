@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/openshell-sandbox",
-  "version": "2026.5.12-beta.8",
+  "version": "2026.5.12",
   "description": "OpenClaw OpenShell sandbox backend",
   "repository": {
     "type": "git",
@@ -24,10 +24,10 @@
       "minHostVersion": ">=2026.5.12-beta.6"
     },
     "compat": {
-      "pluginApi": ">=2026.5.12-beta.8"
+      "pluginApi": ">=2026.5.12"
     },
     "build": {
-      "openclawVersion": "2026.5.12-beta.8"
+      "openclawVersion": "2026.5.12"
     },
     "release": {
       "publishToClawHub": true,
