@@ -15,6 +15,7 @@ import {
   formatErrorMessage,
   isActiveHarnessContextEngine,
   isSubagentSessionKey,
+  loadCodexBundleMcpThreadConfig,
   normalizeAgentRuntimeTools,
   resolveAttemptSpawnWorkspaceDir,
   resolveAgentHarnessBeforePromptBuildResult,
@@ -87,6 +88,7 @@ import { buildCodexPluginAppCacheKey } from "./plugin-app-cache-key.js";
 import {
   buildCodexPluginThreadConfig,
   buildCodexPluginThreadConfigInputFingerprint,
+  mergeCodexThreadConfigs,
   shouldBuildCodexPluginThreadConfig,
 } from "./plugin-thread-config.js";
 import {
@@ -497,6 +499,16 @@ export async function runCodexAppServerAttempt(
     : resolveCodexAppServerEnvApiKeyCacheKey({
         startOptions: appServer.start,
       });
+  const bundleMcpThreadConfig = await loadCodexBundleMcpThreadConfig({
+    workspaceDir: effectiveWorkspace,
+    cfg: params.config,
+    toolsEnabled: supportsModelTools(params.model),
+    disableTools: params.disableTools,
+    toolsAllow: params.toolsAllow,
+  });
+  for (const diagnostic of bundleMcpThreadConfig.diagnostics) {
+    embeddedAgentLog.warn(`bundle-mcp: ${diagnostic.pluginId}: ${diagnostic.message}`);
+  }
   const activeContextEngine = isActiveHarnessContextEngine(params.contextEngine)
     ? params.contextEngine
     : undefined;
@@ -693,7 +705,10 @@ export async function runCodexAppServerAttempt(
       : options.nativeHookRelay?.enabled === false
         ? buildCodexNativeHookRelayDisabledConfig()
         : undefined;
-    const threadConfig = nativeHookRelayConfig;
+    const threadConfig = mergeCodexThreadConfigs(
+      nativeHookRelayConfig,
+      bundleMcpThreadConfig?.configPatch as JsonObject | undefined,
+    );
     const pluginThreadConfigEnabled = shouldBuildCodexPluginThreadConfig(pluginConfig);
     const pluginAppCacheKey = buildCodexPluginAppCacheKey({
       appServer,
@@ -752,6 +767,8 @@ export async function runCodexAppServerAttempt(
             appServer: pluginAppServer,
             developerInstructions: promptBuild.developerInstructions,
             config: threadConfig,
+            mcpServersFingerprint: bundleMcpThreadConfig.fingerprint,
+            mcpServersFingerprintEvaluated: bundleMcpThreadConfig.evaluated,
             pluginThreadConfig: pluginThreadConfigEnabled
               ? {
                   enabled: true,
