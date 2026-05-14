@@ -103,6 +103,7 @@ Docs: https://docs.openclaw.ai
 - Update: allow pnpm GitHub-source OpenClaw updates to approve the OpenClaw package build, so source installs complete their prepare/prepack lifecycle. (#81294) Thanks @fuller-stack-dev.
 - Telegram: preserve supported HTML tags in visible replies and durable mirrors so formatted messages render correctly instead of degrading to escaped text. (#80977) Thanks @obviyus.
 - Plugins/runtime: attribute deprecated runtime config load/write warnings to the plugin id and source that triggered them so logs and plugin doctor runs are actionable. Refs #81394. (#81425) Thanks @BKF-Gitty.
+- Agents/cron: honor a cron payload's explicit `timeoutSeconds` for the LLM idle watchdog even when it numerically equals `agents.defaults.timeoutSeconds`, preserving explicit per-run timeout intent and preventing stalled streaming replies from being cut to the implicit 120s cap. (#79426) Thanks @legolaz8451.
 
 ### Changes
 
