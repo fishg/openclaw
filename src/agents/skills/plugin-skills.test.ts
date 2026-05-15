@@ -46,6 +46,7 @@ vi.mock("../../plugins/plugin-metadata-snapshot.js", () => ({
 }));
 
 let resolvePluginSkillDirs: typeof import("./plugin-skills.js").resolvePluginSkillDirs;
+let syncPluginSkillLinks: typeof import("./plugin-skills.js").syncPluginSkillLinks;
 
 const tempDirs = createTrackedTempDirs();
 
@@ -171,7 +172,7 @@ afterEach(async () => {
 
 describe("resolvePluginSkillDirs", () => {
   beforeAll(async () => {
-    ({ resolvePluginSkillDirs } = await import("./plugin-skills.js"));
+    ({ resolvePluginSkillDirs, syncPluginSkillLinks } = await import("./plugin-skills.js"));
   });
 
   beforeEach(() => {
@@ -291,7 +292,7 @@ describe("resolvePluginSkillDirs", () => {
     expect(dirs).toStrictEqual([]);
   });
 
-  it("cleans up generated plugin skill links when the plugin registry is empty", async () => {
+  it("does not mutate generated plugin skill links when the plugin registry is empty", async () => {
     const workspaceDir = await tempDirs.make("openclaw-");
     const pluginSkillsDir = await tempDirs.make("managed-plugin-skills-");
     const staleRoot = await tempDirs.make("stale-plugin-skills-");
@@ -307,14 +308,13 @@ describe("resolvePluginSkillDirs", () => {
     const dirs = resolvePluginSkillDirs({
       workspaceDir,
       config: {} as OpenClawConfig,
-      pluginSkillsDir,
     });
 
     expect(dirs).toStrictEqual([]);
-    await expectPathMissing(path.join(pluginSkillsDir, "stale-skill"));
+    expect(fsSync.readlinkSync(path.join(pluginSkillsDir, "stale-skill"))).toBe(staleSkill);
   });
 
-  it("cleans up generated plugin skill links when no workspace is active", async () => {
+  it("does not mutate generated plugin skill links when no workspace is active", async () => {
     const pluginSkillsDir = await tempDirs.make("managed-plugin-skills-");
     const staleRoot = await tempDirs.make("stale-plugin-skills-");
     const staleSkill = path.join(staleRoot, "stale-skill");
@@ -324,10 +324,21 @@ describe("resolvePluginSkillDirs", () => {
     const dirs = resolvePluginSkillDirs({
       workspaceDir: undefined,
       config: {} as OpenClawConfig,
-      pluginSkillsDir,
     });
 
     expect(dirs).toStrictEqual([]);
+    expect(fsSync.readlinkSync(path.join(pluginSkillsDir, "stale-skill"))).toBe(staleSkill);
+  });
+
+  it("syncPluginSkillLinks cleans up generated links when no plugin skills are active", async () => {
+    const pluginSkillsDir = await tempDirs.make("managed-plugin-skills-");
+    const staleRoot = await tempDirs.make("stale-plugin-skills-");
+    const staleSkill = path.join(staleRoot, "stale-skill");
+    await fs.mkdir(staleSkill, { recursive: true });
+    fsSync.symlinkSync(staleSkill, path.join(pluginSkillsDir, "stale-skill"), "dir");
+
+    syncPluginSkillLinks([], { pluginSkillsDir });
+
     await expectPathMissing(path.join(pluginSkillsDir, "stale-skill"));
   });
 

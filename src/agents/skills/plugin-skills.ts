@@ -16,20 +16,16 @@ import { isPathInsideWithRealpath } from "../../security/scan-paths.js";
 import { CONFIG_DIR } from "../../utils.js";
 
 const log = createSubsystemLogger("skills");
+const publishedPluginSkillSignatures = new Map<string, string>();
 
 type PluginSkillLinkType = "dir" | "junction";
 
 export function resolvePluginSkillDirs(params: {
   workspaceDir: string | undefined;
   config?: OpenClawConfig;
-  /** Override the plugin skills directory for testing. */
-  pluginSkillsDir?: string;
 }): string[] {
   const workspaceDir = (params.workspaceDir ?? "").trim();
   if (!workspaceDir) {
-    publishPluginSkills([], {
-      pluginSkillsDir: params.pluginSkillsDir,
-    });
     return [];
   }
   const config = params.config ?? {};
@@ -46,9 +42,6 @@ export function resolvePluginSkillDirs(params: {
     });
   const registry = metadataSnapshot.manifestRegistry;
   if (registry.plugins.length === 0) {
-    publishPluginSkills([], {
-      pluginSkillsDir: params.pluginSkillsDir,
-    });
     return [];
   }
   const normalizedPlugins = normalizePluginsConfigWithResolver(
@@ -112,12 +105,14 @@ export function resolvePluginSkillDirs(params: {
       resolved.push(candidate);
     }
   }
-
-  publishPluginSkills(resolved, {
-    pluginSkillsDir: params.pluginSkillsDir,
-  });
-
   return resolved;
+}
+
+export function syncPluginSkillLinks(
+  skillDirs: string[],
+  opts?: { pluginSkillsDir?: string },
+): void {
+  publishPluginSkills(skillDirs, opts);
 }
 
 function resolveDefaultPluginSkillsDir(): string {
@@ -209,6 +204,16 @@ function publishPluginSkills(skillDirs: string[], opts?: { pluginSkillsDir?: str
   for (const dir of skillDirs) {
     collectSkillTargets(dir, managedTargets);
   }
+  const signature = Array.from(managedTargets.entries())
+    .toSorted(([leftName], [rightName]) => leftName.localeCompare(rightName, "en"))
+    .map(([name, target]) => `${name}\u0000${target}`)
+    .join("\u0001");
+  if (
+    publishedPluginSkillSignatures.get(pluginSkillsDir) === signature &&
+    (managedTargets.size === 0 || fs.existsSync(pluginSkillsDir))
+  ) {
+    return;
+  }
 
   // Plugin skill symlinks are owned by OpenClaw and publish at extra-dir
   // precedence, so they never shadow managed or bundled skills.
@@ -257,6 +262,7 @@ function publishPluginSkills(skillDirs: string[], opts?: { pluginSkillsDir?: str
     const linkPath = path.join(pluginSkillsDir, entry.name);
     removeGeneratedPluginSkillEntry(linkPath);
   }
+  publishedPluginSkillSignatures.set(pluginSkillsDir, signature);
 }
 
 function isGeneratedPluginSkillEntry(entry: fs.Dirent): boolean {

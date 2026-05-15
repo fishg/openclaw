@@ -18,7 +18,7 @@ import { shouldIncludeSkill } from "./config.js";
 import { normalizeSkillFilter } from "./filter.js";
 import { resolveOpenClawMetadata, resolveSkillInvocationPolicy } from "./frontmatter.js";
 import { loadSkillsFromDirSafe, readSkillFrontmatterSafe } from "./local-loader.js";
-import { resolvePluginSkillDirs } from "./plugin-skills.js";
+import { resolvePluginSkillDirs, syncPluginSkillLinks } from "./plugin-skills.js";
 import { serializeByKey } from "./serialize.js";
 import { formatSkillsForPrompt, type Skill } from "./skill-contract.js";
 import type {
@@ -752,8 +752,8 @@ function loadSkillEntries(
   const pluginSkillDirs = resolvePluginSkillDirs({
     workspaceDir,
     config: opts?.config,
-    pluginSkillsDir,
   });
+  syncPluginSkillLinks(pluginSkillDirs, { pluginSkillsDir });
   const mergedExtraDirs = [...extraDirs, ...pluginSkillDirs];
 
   const bundledSkills = bundledSkillsDir
