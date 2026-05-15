@@ -168,6 +168,15 @@ function sortContextFilesForPrompt(contextFiles: EmbeddedContextFile[]): Embedde
   });
 }
 
+function summarizeContextFilesForStableCache(contextFiles: EmbeddedContextFile[]) {
+  return contextFiles.map((file) => ({
+    path: normalizeContextFilePath(file.path),
+    contentFingerprint:
+      normalizeOptionalLowercaseString(file.contentFingerprint) ??
+      hashStablePromptInput(file.content),
+  }));
+}
+
 function buildProjectContextSection(params: {
   files: EmbeddedContextFile[];
   heading: string;
@@ -920,6 +929,7 @@ export function buildAgentSystemPrompt(params: {
   const orderedContextFiles = sortContextFilesForPrompt(validContextFiles);
   const stableContextFiles = orderedContextFiles.filter((file) => !isDynamicContextFile(file.path));
   const dynamicContextFiles = orderedContextFiles.filter((file) => isDynamicContextFile(file.path));
+  const stableContextFileCacheSummary = summarizeContextFilesForStableCache(stableContextFiles);
   const bootstrapSystemPromptSections = buildAgentBootstrapSystemPromptSections({
     bootstrapMode: params.bootstrapMode,
     bootstrapTruncationNotice: params.bootstrapTruncationNotice,
@@ -962,7 +972,7 @@ export function buildAgentSystemPrompt(params: {
     memoryCitationsMode: params.memoryCitationsMode,
     memorySection,
     acpEnabled,
-    stableContextFiles,
+    stableContextFiles: stableContextFileCacheSummary,
   });
   const stablePrefix = cacheStablePromptPrefix(stablePrefixCacheKey, () => {
     const lines = [

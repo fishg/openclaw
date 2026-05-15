@@ -1,4 +1,8 @@
-export type EmbeddedContextFile = { path: string; content: string };
+export type EmbeddedContextFile = {
+  path: string;
+  content: string;
+  contentFingerprint?: string;
+};
 
 export type FailoverReason =
   | "auth"

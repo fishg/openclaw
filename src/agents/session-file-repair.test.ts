@@ -390,6 +390,45 @@ describe("repairSessionFileIfNeeded", () => {
     expect(after).toBe(original);
   });
 
+  it("skips repeated unchanged clean files after the first scan", async () => {
+    const { file } = await createTempSessionPath();
+    const { header, message } = buildSessionHeaderAndMessage();
+    const original = `${JSON.stringify(header)}\n${JSON.stringify(message)}\n`;
+    await fs.writeFile(file, original, "utf-8");
+
+    const readSpy = vi.spyOn(fs, "readFile");
+
+    const first = await repairSessionFileIfNeeded({ sessionFile: file });
+    const readsAfterFirst = readSpy.mock.calls.length;
+    const second = await repairSessionFileIfNeeded({ sessionFile: file });
+
+    expect(first.repaired).toBe(false);
+    expect(second.repaired).toBe(false);
+    expect(readSpy.mock.calls).toHaveLength(readsAfterFirst);
+  });
+
+  it("re-scans a clean file after it changes on disk", async () => {
+    const { file } = await createTempSessionPath();
+    const { header, message } = buildSessionHeaderAndMessage();
+    const original = `${JSON.stringify(header)}\n${JSON.stringify(message)}\n`;
+    await fs.writeFile(file, original, "utf-8");
+
+    const readSpy = vi.spyOn(fs, "readFile");
+
+    await repairSessionFileIfNeeded({ sessionFile: file });
+    const readsAfterFirst = readSpy.mock.calls.length;
+
+    const nextMessage = {
+      ...message,
+      id: "msg-2",
+      message: { role: "user", content: "changed" },
+    };
+    await fs.writeFile(file, `${original}${JSON.stringify(nextMessage)}\n`, "utf-8");
+
+    await repairSessionFileIfNeeded({ sessionFile: file });
+    expect(readSpy.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+  });
+
   it("does not trim non-trailing assistant messages", async () => {
     const { file } = await createTempSessionPath();
     const { header, message } = buildSessionHeaderAndMessage();

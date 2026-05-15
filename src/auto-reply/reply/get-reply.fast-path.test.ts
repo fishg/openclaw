@@ -76,16 +76,6 @@ function requirePreparedReplyParams() {
   return preparedReplyParams;
 }
 
-function requireDirectiveParams() {
-  const directiveParams = mocks.resolveReplyDirectives.mock.calls[0]?.[0] as
-    | { sessionKey?: string; workspaceDir?: string }
-    | undefined;
-  if (!directiveParams) {
-    throw new Error("expected directive params");
-  }
-  return directiveParams;
-}
-
 describe("getReplyFromConfig fast test bootstrap", () => {
   beforeAll(async () => {
     await loadGetReplyRuntimeForTest();
@@ -149,7 +139,6 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(vi.mocked(loadConfigMock)).not.toHaveBeenCalled();
     expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
     expect(mocks.initSessionState).not.toHaveBeenCalled();
-    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
     expect(vi.mocked(runPreparedReplyMock)).toHaveBeenCalledOnce();
     const preparedReplyParams = requirePreparedReplyParams();
     expect(preparedReplyParams.cfg).toBe(cfg);
@@ -185,7 +174,6 @@ describe("getReplyFromConfig fast test bootstrap", () => {
       text: "ok",
     });
     expect(vi.mocked(loadConfigMock)).not.toHaveBeenCalled();
-    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
     expect(vi.mocked(runPreparedReplyMock)).toHaveBeenCalledOnce();
   });
 
@@ -304,7 +292,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     }
     expect(reply.text.includes("OpenClaw")).toBe(true);
     expect(reply.text.includes("Think: medium")).toBe(true);
-    expect(mocks.loadModelCatalog).toHaveBeenCalledWith({ config: cfg });
+    expect(mocks.loadModelCatalog).toHaveBeenCalledWith({ config: cfg, readOnly: true });
     expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
     expect(mocks.initSessionState).not.toHaveBeenCalled();
     expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
@@ -432,35 +420,72 @@ describe("getReplyFromConfig fast test bootstrap", () => {
       },
       session: { store: path.join(home, "sessions.json") },
     } as OpenClawConfig);
-    mocks.resolveReplyDirectives.mockResolvedValueOnce({
-      kind: "reply",
-      reply: { text: "model status" },
-    });
+    const reply = await getReplyFromConfig(
+      buildGetReplyCtx({
+        Body: "/model status",
+        BodyForAgent: "/model status",
+        RawBody: "/model status",
+        CommandBody: "/model status",
+        CommandSource: "native",
+        CommandAuthorized: true,
+        SessionKey: "telegram:slash:123",
+        CommandTargetSessionKey: targetSessionKey,
+      }),
+      undefined,
+      cfg,
+    );
 
-    await expect(
-      getReplyFromConfig(
-        buildGetReplyCtx({
-          Body: "/model status",
-          BodyForAgent: "/model status",
-          RawBody: "/model status",
-          CommandBody: "/model status",
-          CommandSource: "native",
-          CommandAuthorized: true,
-          SessionKey: "telegram:slash:123",
-          CommandTargetSessionKey: targetSessionKey,
-        }),
-        undefined,
-        cfg,
-      ),
-    ).resolves.toEqual({ text: "model status" });
+    expect(Array.isArray(reply)).toBe(false);
+    if (!reply || Array.isArray(reply)) {
+      throw new Error("expected single reply payload");
+    }
+    expect(reply.text).toContain("Current:");
+    expect(reply.text).toContain("Default:");
 
     expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
     expect(mocks.initSessionState).not.toHaveBeenCalled();
     expect(vi.mocked(runPreparedReplyMock)).not.toHaveBeenCalled();
-    expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();
-    const directiveParams = requireDirectiveParams();
-    expect(directiveParams.sessionKey).toBe(targetSessionKey);
-    expect(directiveParams.workspaceDir).toBe("/tmp/workspace");
+    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
+  });
+
+  it("handles native slash /model summary before directive runtime bootstrap", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-native-model-fast-"));
+    const targetSessionKey = "agent:main:telegram:123";
+    const cfg = markCompleteReplyConfig({
+      agents: {
+        defaults: {
+          model: "anthropic/claude-opus-4-6",
+          workspace: path.join(home, "workspace"),
+        },
+      },
+      session: { store: path.join(home, "sessions.json") },
+    } as OpenClawConfig);
+
+    const reply = await getReplyFromConfig(
+      buildGetReplyCtx({
+        Body: "/model",
+        BodyForAgent: "/model",
+        RawBody: "/model",
+        CommandBody: "/model",
+        CommandSource: "native",
+        CommandAuthorized: true,
+        SessionKey: "telegram:slash:123",
+        CommandTargetSessionKey: targetSessionKey,
+      }),
+      undefined,
+      cfg,
+    );
+
+    expect(Array.isArray(reply)).toBe(false);
+    if (!reply || Array.isArray(reply)) {
+      throw new Error("expected single reply payload");
+    }
+    expect(reply.text).toContain("Current:");
+    expect(reply.text).toContain("Switch: /model <provider/model>");
+    expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
+    expect(mocks.initSessionState).not.toHaveBeenCalled();
+    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
+    expect(vi.mocked(runPreparedReplyMock)).not.toHaveBeenCalled();
   });
 
   it("uses native command target session keys during fast bootstrap", () => {

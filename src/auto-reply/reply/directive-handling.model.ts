@@ -32,6 +32,17 @@ import {
 export { resolveModelSelectionFromDirective } from "./directive-handling.model-selection.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 
+function createModelDirectiveDiagTracker(params: {
+  branch: "summary" | "status" | "legacy-list";
+  provider: string;
+  model: string;
+  agentId: string;
+  surface?: string;
+}) {
+  void params;
+  return { mark: (_name: string, _extra?: string) => {}, finish: (_outcome: string) => {} };
+}
+
 function isMissingAuthLabel(auth: { label: string; source: string }): boolean {
   return auth.label === "missing" && auth.source === "missing";
 }
@@ -338,15 +349,14 @@ export async function maybeHandleModelDirectiveInfo(params: {
     return { text: "Auth profile override requires a model selection." };
   }
 
-  const pickerCatalog = buildModelPickerCatalog({
-    cfg: params.cfg,
-    defaultProvider: params.defaultProvider,
-    defaultModel: params.defaultModel,
-    aliasIndex: params.aliasIndex,
-    allowedModelCatalog: params.allowedModelCatalog,
-  });
-
   if (wantsLegacyList) {
+    const diag = createModelDirectiveDiagTracker({
+      branch: "legacy-list",
+      provider: params.provider,
+      model: params.model,
+      agentId: params.activeAgentId,
+      surface: params.surface,
+    });
     const reply = await resolveModelsCommandReply({
       cfg: params.cfg,
       commandBodyNormalized: "/models",
@@ -357,23 +367,35 @@ export async function maybeHandleModelDirectiveInfo(params: {
       workspaceDir: params.workspaceDir,
       sessionEntry: isCompleteSessionEntry(params.sessionEntry) ? params.sessionEntry : undefined,
     });
+    diag.mark("resolve-models-command-reply");
+    diag.finish(reply ? "reply" : "empty");
     return reply ?? { text: "No models available." };
   }
 
   if (wantsSummary) {
+    const diag = createModelDirectiveDiagTracker({
+      branch: "summary",
+      provider: params.provider,
+      model: params.model,
+      agentId: params.activeAgentId,
+      surface: params.surface,
+    });
     const modelRefs = resolveSelectedAndActiveModel({
       selectedProvider: params.provider,
       selectedModel: params.model,
       sessionEntry: params.sessionEntry,
     });
+    diag.mark("resolve-selected-active-model");
     const current = modelRefs.selected.label;
     const activeRuntimeLine = modelRefs.activeDiffers
       ? `Active: ${modelRefs.active.label} (runtime)`
       : null;
     const commandPlugin = params.surface ? getChannelPlugin(params.surface) : null;
+    diag.mark("get-channel-plugin", `hasPlugin=${Boolean(commandPlugin)}`);
     const channelData = commandPlugin?.commands?.buildModelBrowseChannelData?.();
+    diag.mark("build-browse-channel-data", `hasChannelData=${Boolean(channelData)}`);
     if (channelData) {
-      return {
+      const reply = {
         text: [
           `Current: ${current}${modelRefs.activeDiffers ? " (selected)" : ""}`,
           activeRuntimeLine,
@@ -386,10 +408,15 @@ export async function maybeHandleModelDirectiveInfo(params: {
           .filter(Boolean)
           .join("\n"),
         channelData,
+      } satisfies ReplyPayload;
+      diag.mark("build-summary-reply", "channelData");
+      diag.finish("reply");
+      return {
+        ...reply,
       };
     }
 
-    return {
+    const reply = {
       text: [
         `Current: ${current}${modelRefs.activeDiffers ? " (selected)" : ""}`,
         activeRuntimeLine,
@@ -401,8 +428,27 @@ export async function maybeHandleModelDirectiveInfo(params: {
       ]
         .filter(Boolean)
         .join("\n"),
-    };
+    } satisfies ReplyPayload;
+    diag.mark("build-summary-reply", "text-only");
+    diag.finish("reply");
+    return reply;
   }
+
+  const diag = createModelDirectiveDiagTracker({
+    branch: "status",
+    provider: params.provider,
+    model: params.model,
+    agentId: params.activeAgentId,
+    surface: params.surface,
+  });
+  const pickerCatalog = buildModelPickerCatalog({
+    cfg: params.cfg,
+    defaultProvider: params.defaultProvider,
+    defaultModel: params.defaultModel,
+    aliasIndex: params.aliasIndex,
+    allowedModelCatalog: params.allowedModelCatalog,
+  });
+  diag.mark("build-picker-catalog", `entries=${pickerCatalog.length}`);
 
   const modelsPath = `${params.agentDir}/models.json`;
   const formatPath = (value: string) => shortenHomePath(value);
@@ -417,6 +463,7 @@ export async function maybeHandleModelDirectiveInfo(params: {
     if (authByProvider.has(provider)) {
       continue;
     }
+    const providerStartedAt = Date.now();
     const authLabel = await resolveStatusAuthLabel({
       provider,
       modelId: entry.id,
@@ -429,6 +476,10 @@ export async function maybeHandleModelDirectiveInfo(params: {
       sessionEntry: params.sessionEntry,
     });
     authByProvider.set(provider, authLabel);
+    diag.mark(
+      `auth:${provider}`,
+      `model=${entry.id} labelMs=${Math.max(0, Math.round(Date.now() - providerStartedAt))}`,
+    );
   }
 
   const modelRefs = resolveSelectedAndActiveModel({
@@ -436,6 +487,7 @@ export async function maybeHandleModelDirectiveInfo(params: {
     selectedModel: params.model,
     sessionEntry: params.sessionEntry,
   });
+  diag.mark("resolve-selected-active-model");
   const current = modelRefs.selected.label;
   const defaultLabel = `${params.defaultProvider}/${params.defaultModel}`;
   const lines = [
@@ -455,6 +507,7 @@ export async function maybeHandleModelDirectiveInfo(params: {
     entries: pickerCatalog,
     authByProvider,
   });
+  diag.mark("filter-nested-provider-duplicates", `entries=${statusCatalog.length}`);
   for (const entry of statusCatalog) {
     const provider = normalizeProviderId(entry.provider);
     const models = byProvider.get(provider);
@@ -464,6 +517,7 @@ export async function maybeHandleModelDirectiveInfo(params: {
     }
     byProvider.set(provider, [entry]);
   }
+  diag.mark("group-by-provider", `providers=${byProvider.size}`);
 
   for (const provider of byProvider.keys()) {
     const models = byProvider.get(provider);
@@ -485,6 +539,8 @@ export async function maybeHandleModelDirectiveInfo(params: {
       lines.push(`  • ${label}${aliasSuffix}`);
     }
   }
+  diag.mark("render-status-lines", `lines=${lines.length}`);
+  diag.finish("reply");
   return { text: lines.join("\n") };
 }
 

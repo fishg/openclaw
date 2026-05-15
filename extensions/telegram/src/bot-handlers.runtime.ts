@@ -91,6 +91,7 @@ import {
   withResolvedTelegramForumFlag,
 } from "./bot/helpers.js";
 import type { TelegramContext, TelegramGetChat } from "./bot/types.js";
+import { answerTelegramCallbackQueryOnce } from "./callback-query-ack.js";
 import { buildCommandsPaginationKeyboard, buildTelegramModelsMenuButtons } from "./command-ui.js";
 import {
   resolveTelegramConversationBaseSessionKey,
@@ -1775,16 +1776,11 @@ export const registerTelegramHandlers = ({
     if (shouldSkipUpdate(ctx)) {
       return;
     }
-    const answerCallbackQuery =
-      typeof (ctx as { answerCallbackQuery?: unknown }).answerCallbackQuery === "function"
-        ? () => ctx.answerCallbackQuery()
-        : () => bot.api.answerCallbackQuery(callback.id);
-    // Answer immediately to prevent Telegram from retrying while we process
-    await withTelegramApiErrorLogging({
-      operation: "answerCallbackQuery",
+    await answerTelegramCallbackQueryOnce({
+      ctx,
       runtime,
-      fn: answerCallbackQuery,
-    }).catch(() => {});
+      answerById: (callbackId) => bot.api.answerCallbackQuery(callbackId),
+    });
     try {
       const data = (callback.data ?? "").trim();
       const callbackMessage = callback.message;

@@ -32,7 +32,7 @@ function splitBody(body: string) {
 
 async function loadResetModelCatalog(cfg: OpenClawConfig): Promise<ModelCatalogEntry[]> {
   const { loadModelCatalog } = await import("../../agents/model-catalog.js");
-  return loadModelCatalog({ config: cfg });
+  return loadModelCatalog({ config: cfg, readOnly: true });
 }
 
 async function resolveResetFallbackModels(params: {

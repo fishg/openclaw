@@ -286,7 +286,7 @@ async function resolveModelOverride(params: {
     cfg: params.cfg,
     defaultProvider: currentProvider,
   });
-  const catalog = await loadModelCatalog({ config: params.cfg });
+  const catalog = await loadModelCatalog({ config: params.cfg, readOnly: true });
   const policy = createModelVisibilityPolicy({
     cfg: params.cfg,
     catalog,
@@ -717,7 +717,7 @@ export function createSessionStatusTool(opts?: {
             cfg,
             provider: providerForCard,
             model: defaultModelForCard,
-            loadModelCatalog: () => loadModelCatalog({ config: cfg }),
+            loadModelCatalog: () => loadModelCatalog({ config: cfg, readOnly: true }),
           }),
         isGroup,
         defaultGroupActivation: () => "mention",

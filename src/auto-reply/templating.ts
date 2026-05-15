@@ -212,6 +212,8 @@ export type MsgContext = {
   Provider?: string;
   /** Provider surface label. Prefer this over `Provider` when available. */
   Surface?: string;
+  /** Channel-specific structured metadata for diagnostics and routing helpers. */
+  Extra?: Record<string, unknown>;
   /** Platform bot username when command mentions should be normalized. */
   BotUsername?: string;
   WasMentioned?: boolean;

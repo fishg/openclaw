@@ -22,6 +22,13 @@ type RepairReport = {
   reason?: string;
 };
 
+type SessionRepairCleanCacheEntry = {
+  size: number;
+  mtimeMs: number;
+};
+
+const cleanSessionRepairCache = new Map<string, SessionRepairCleanCacheEntry>();
+
 // The sentinel text is shared with stream-message-shared.ts and
 // replay-history.ts so a repaired entry is byte-identical to a live
 // stream-error turn, keeping the repair pass idempotent.
@@ -291,6 +298,26 @@ function insertMissingCodeModeToolResults(entries: unknown[]): {
   return { entries: insertedToolResults > 0 ? out : entries, insertedToolResults };
 }
 
+function readCachedCleanSessionRepairState(sessionFile: string):
+  | SessionRepairCleanCacheEntry
+  | undefined {
+  return cleanSessionRepairCache.get(sessionFile);
+}
+
+function cacheCleanSessionRepairState(
+  sessionFile: string,
+  stat: { size: number; mtimeMs: number },
+): void {
+  cleanSessionRepairCache.set(sessionFile, {
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  });
+}
+
+function clearCleanSessionRepairState(sessionFile: string): void {
+  cleanSessionRepairCache.delete(sessionFile);
+}
+
 export async function repairSessionFileIfNeeded(params: {
   sessionFile: string;
   debug?: (message: string) => void;
@@ -301,16 +328,43 @@ export async function repairSessionFileIfNeeded(params: {
     return { repaired: false, droppedLines: 0, reason: "missing session file" };
   }
 
+  let stat: { size: number; mtimeMs: number } | null = null;
+  try {
+    const nextStat = await fs.stat(sessionFile);
+    stat = { size: nextStat.size, mtimeMs: nextStat.mtimeMs };
+  } catch (err) {
+    const code = (err as { code?: unknown } | undefined)?.code;
+    if (code === "ENOENT") {
+      clearCleanSessionRepairState(sessionFile);
+      return { repaired: false, droppedLines: 0, reason: "missing session file" };
+    }
+    const reason = `failed to stat session file: ${err instanceof Error ? err.message : "unknown error"}`;
+    params.warn?.(`session file repair skipped: ${reason} (${path.basename(sessionFile)})`);
+    clearCleanSessionRepairState(sessionFile);
+    return { repaired: false, droppedLines: 0, reason };
+  }
+
+  const cachedClean = readCachedCleanSessionRepairState(sessionFile);
+  if (
+    cachedClean &&
+    cachedClean.size === stat.size &&
+    cachedClean.mtimeMs === stat.mtimeMs
+  ) {
+    return { repaired: false, droppedLines: 0 };
+  }
+
   let content: string;
   try {
     content = await fs.readFile(sessionFile, "utf-8");
   } catch (err) {
     const code = (err as { code?: unknown } | undefined)?.code;
     if (code === "ENOENT") {
+      clearCleanSessionRepairState(sessionFile);
       return { repaired: false, droppedLines: 0, reason: "missing session file" };
     }
     const reason = `failed to read session file: ${err instanceof Error ? err.message : "unknown error"}`;
     params.warn?.(`session file repair skipped: ${reason} (${path.basename(sessionFile)})`);
+    clearCleanSessionRepairState(sessionFile);
     return { repaired: false, droppedLines: 0, reason };
   }
 
@@ -367,6 +421,7 @@ export async function repairSessionFileIfNeeded(params: {
   }
 
   if (entries.length === 0) {
+    clearCleanSessionRepairState(sessionFile);
     return { repaired: false, droppedLines, reason: "empty session file" };
   }
 
@@ -374,6 +429,7 @@ export async function repairSessionFileIfNeeded(params: {
     params.warn?.(
       `session file repair skipped: invalid session header (${path.basename(sessionFile)})`,
     );
+    clearCleanSessionRepairState(sessionFile);
     return { repaired: false, droppedLines, reason: "invalid session header" };
   }
 
@@ -386,6 +442,7 @@ export async function repairSessionFileIfNeeded(params: {
     const repairedToolResults = insertMissingCodeModeToolResults(entries);
     insertedToolResults = repairedToolResults.insertedToolResults;
     if (insertedToolResults === 0) {
+      cacheCleanSessionRepairState(sessionFile, stat);
       return { repaired: false, droppedLines: 0 };
     }
     entries.splice(0, entries.length, ...repairedToolResults.entries);
@@ -412,6 +469,7 @@ export async function repairSessionFileIfNeeded(params: {
       tempPrefix: `${path.basename(sessionFile)}.repair`,
     });
   } catch (err) {
+    clearCleanSessionRepairState(sessionFile);
     return {
       repaired: false,
       droppedLines,
@@ -420,6 +478,16 @@ export async function repairSessionFileIfNeeded(params: {
       rewrittenUserMessages,
       reason: `repair failed: ${err instanceof Error ? err.message : "unknown error"}`,
     };
+  }
+
+  try {
+    const repairedStat = await fs.stat(sessionFile);
+    cacheCleanSessionRepairState(sessionFile, {
+      size: repairedStat.size,
+      mtimeMs: repairedStat.mtimeMs,
+    });
+  } catch {
+    clearCleanSessionRepairState(sessionFile);
   }
 
   params.debug?.(

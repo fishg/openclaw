@@ -36,6 +36,7 @@ import { resolveDefaultAgentId } from "./bot.agent.runtime.js";
 import { apiThrottler, Bot, sequentialize, type ApiClientOptions } from "./bot.runtime.js";
 import type { TelegramBotOptions } from "./bot.types.js";
 import { buildTelegramGroupPeerId, resolveTelegramStreamMode } from "./bot/helpers.js";
+import { answerTelegramCallbackQueryOnce } from "./callback-query-ack.js";
 import { resolveTelegramTransport } from "./fetch.js";
 import { tagTelegramNetworkError } from "./network-errors.js";
 import { readCachedTelegramBotInfo } from "./probe.js";
@@ -408,6 +409,15 @@ export function createTelegramBotCore(
     } finally {
       updateTracker.finishUpdate(begin.update, { completed });
     }
+  });
+
+  bot.use(async (ctx, next) => {
+    await answerTelegramCallbackQueryOnce({
+      ctx,
+      runtime,
+      answerById: (callbackId) => bot.api.answerCallbackQuery(callbackId),
+    });
+    await next();
   });
 
   bot.use(botRuntime.sequentialize(getTelegramSequentialKey));

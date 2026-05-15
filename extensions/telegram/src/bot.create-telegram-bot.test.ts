@@ -737,6 +737,77 @@ describe("createTelegramBot", () => {
     }
   });
 
+  it("answers callback queries before waiting for a busy sequential lane", async () => {
+    installPerKeySequentializer();
+    createTelegramBot({ token: "tok" });
+    const callbackHandler = getOnHandler("callback_query");
+    const events: string[] = [];
+    let releaseBusyTurn: (() => void) | undefined;
+    const busyGate = new Promise<void>((resolve) => {
+      releaseBusyTurn = resolve;
+    });
+    const busyCtx = {
+      message: {
+        chat: { id: 1234, type: "private" },
+        from: { id: 9, first_name: "Ada", username: "ada_bot" },
+        text: "busy",
+        date: 1736380800,
+        message_id: 9,
+      },
+      update: { update_id: 900 },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    };
+    const callbackCtx = {
+      update: { update_id: 901 },
+      callbackQuery: {
+        id: "cbq-lane-busy-1",
+        data: "cmd:option_a",
+        from: { id: 9, first_name: "Ada", username: "ada_bot" },
+        message: {
+          chat: { id: 1234, type: "private" },
+          date: 1736380800,
+          message_id: 10,
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    };
+
+    const busyPromise = runTelegramMiddlewareChain({
+      ctx: busyCtx,
+      finalHandler: async () => {
+        events.push("busy:start");
+        await busyGate;
+        events.push("busy:end");
+      },
+    });
+
+    await flushTelegramTestMicrotasks();
+    expect(events).toEqual(["busy:start"]);
+
+    const callbackPromise = runTelegramMiddlewareChain({
+      ctx: callbackCtx,
+      finalHandler: callbackHandler,
+    });
+
+    await vi.waitFor(() => {
+      expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-lane-busy-1");
+    });
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(events).toEqual(["busy:start"]);
+
+    if (!releaseBusyTurn) {
+      throw new Error("Expected Telegram busy turn release callback to be initialized");
+    }
+    releaseBusyTurn();
+    await Promise.all([busyPromise, callbackPromise]);
+
+    expect(events).toEqual(["busy:start", "busy:end"]);
+    expect(replySpy).toHaveBeenCalledTimes(1);
+    expect(answerCallbackQuerySpy).toHaveBeenCalledTimes(1);
+  });
+
   it("routes callback_query payloads as messages and answers callbacks", async () => {
     createTelegramBot({ token: "tok" });
     const callbackHandler = requireValue(

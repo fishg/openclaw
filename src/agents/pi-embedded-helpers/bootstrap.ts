@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -300,6 +301,7 @@ export function buildBootstrapContextFiles(
       result.push({
         path: pathValue,
         content: cappedMissingText,
+        contentFingerprint: createHash("sha256").update(cappedMissingText).digest("hex"),
       });
       continue;
     }
@@ -324,6 +326,7 @@ export function buildBootstrapContextFiles(
     result.push({
       path: pathValue,
       content: contentWithinBudget,
+      contentFingerprint: createHash("sha256").update(contentWithinBudget).digest("hex"),
     });
   }
   return result;

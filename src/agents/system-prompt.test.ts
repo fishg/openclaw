@@ -703,6 +703,22 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Bravo");
   });
 
+  it("renders project context the same when content fingerprints are provided", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      contextFiles: [
+        { path: "AGENTS.md", content: "Alpha", contentFingerprint: "fp-agents" },
+        { path: "IDENTITY.md", content: "Bravo", contentFingerprint: "fp-identity" },
+      ],
+    });
+
+    expect(prompt).toContain("# Project Context");
+    expect(prompt).toContain("## AGENTS.md");
+    expect(prompt).toContain("Alpha");
+    expect(prompt).toContain("## IDENTITY.md");
+    expect(prompt).toContain("Bravo");
+  });
+
   it("ignores context files with missing or blank paths", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

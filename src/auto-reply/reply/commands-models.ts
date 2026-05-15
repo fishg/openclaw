@@ -77,7 +77,7 @@ export async function buildModelsProviderData(
     agentId,
   });
 
-  const catalog = await loadModelCatalog({ config: cfg });
+  const catalog = await loadModelCatalog({ config: cfg, readOnly: true });
   const visibilityPolicy = createModelVisibilityPolicy({
     cfg,
     catalog,
