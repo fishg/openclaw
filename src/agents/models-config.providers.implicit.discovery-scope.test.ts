@@ -67,14 +67,6 @@ function createTextModel(id: string, name: string) {
   };
 }
 
-function firstMockArg(mock: { mock: { calls: unknown[][] } }, label: string): unknown {
-  const call = mock.mock.calls[0];
-  if (!call) {
-    throw new Error(`Expected ${label} to be called`);
-  }
-  return call[0];
-}
-
 describe("resolveImplicitProviders startup discovery scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();

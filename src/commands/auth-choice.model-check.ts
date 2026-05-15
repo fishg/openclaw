@@ -8,6 +8,20 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import { buildProviderAuthRecoveryHint } from "./provider-auth-guidance.js";
 
+function uniqueProviders(providers: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const provider of providers) {
+    const trimmed = provider.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
 function resolveAuthProviderCandidates(params: {
   config: OpenClawConfig;
   provider: string;
@@ -20,15 +34,13 @@ function resolveAuthProviderCandidates(params: {
     config: params.config,
     agentId: params.agentId,
   });
-  return [
-    ...new Set([
-      params.provider,
-      ...listOpenAIAuthProfileProvidersForAgentRuntime({
-        provider: params.provider,
-        harnessRuntime: harnessPolicy.runtime,
-      }),
-    ]),
-  ];
+  return uniqueProviders([
+    params.provider,
+    ...listOpenAIAuthProfileProvidersForAgentRuntime({
+      provider: params.provider,
+      harnessRuntime: harnessPolicy.runtime,
+    }),
+  ]);
 }
 
 export async function warnIfModelConfigLooksOff(

@@ -173,8 +173,12 @@ describe("ensureMatrixSdkInstalled", () => {
       throw new Error("Cannot find module");
     });
     await expect(ensureMatrixSdkInstalled({ resolveFn })).rejects.toThrow(
-      /Matrix plugin dependencies are missing: matrix-js-sdk, @matrix-org\/matrix-sdk-crypto-nodejs, @matrix-org\/matrix-sdk-crypto-wasm\. Repair this plugin with `openclaw plugins update matrix` or run `openclaw doctor --fix`\./,
+      /matrix-js-sdk.*@matrix-org\/matrix-sdk-crypto-nodejs.*@matrix-org\/matrix-sdk-crypto-wasm/s,
     );
+    await expect(ensureMatrixSdkInstalled({ resolveFn })).rejects.toThrow(
+      /openclaw plugins update matrix/,
+    );
+    await expect(ensureMatrixSdkInstalled({ resolveFn })).rejects.toThrow(/openclaw doctor --fix/);
   });
 
   it("lists only the packages that fail to resolve", async () => {

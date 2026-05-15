@@ -439,11 +439,18 @@ describe("migrateApplyCommand", () => {
 
     await migrateDefaultCommand(runtime, { provider: "codex" });
 
-    const selectionPrompt = multiselectPrompt();
-    expect(String(selectionPrompt.message)).toContain("Select Codex skills");
-    expect(selectionPrompt.initialValues).toStrictEqual(["skill:alpha", "skill:beta"]);
-    expect(selectionPrompt.required).toBe(false);
-    expect(selectionPrompt.options?.map(({ label, value }) => ({ label, value }))).toStrictEqual([
+    const selectionPrompt = mocks.multiselect.mock.calls[0]?.[0] as
+      | {
+          initialValues?: unknown;
+          message?: unknown;
+          options?: Array<{ label?: unknown; value?: unknown }>;
+          required?: unknown;
+        }
+      | undefined;
+    expect(String(selectionPrompt?.message)).toContain("Select Codex skills");
+    expect(selectionPrompt?.initialValues).toStrictEqual(["skill:alpha", "skill:beta"]);
+    expect(selectionPrompt?.required).toBe(false);
+    expect(selectionPrompt?.options?.map(({ label, value }) => ({ label, value }))).toStrictEqual([
       { value: MIGRATION_SKILL_SELECTION_ACCEPT, label: "Accept recommended" },
       { value: "skill:alpha", label: "alpha" },
       { value: "skill:beta", label: "beta" },
@@ -497,13 +504,20 @@ describe("migrateApplyCommand", () => {
     await migrateDefaultCommand(runtime, { provider: "codex" });
 
     expect(mocks.multiselect).toHaveBeenCalledTimes(2);
-    const skillPrompt = multiselectPrompt();
-    expect(String(skillPrompt.message)).toContain("Select Codex skills");
-    const pluginPrompt = multiselectPrompt(1);
-    expect(String(pluginPrompt.message)).toContain("Select native Codex plugins");
-    expect(pluginPrompt.initialValues).toStrictEqual(["plugin:google-calendar", "plugin:gmail"]);
-    expect(pluginPrompt.required).toBe(false);
-    expect(pluginPrompt.options?.map(({ label, value }) => ({ label, value }))).toStrictEqual([
+    const skillPrompt = mocks.multiselect.mock.calls[0]?.[0] as { message?: unknown } | undefined;
+    expect(String(skillPrompt?.message)).toContain("Select Codex skills");
+    const pluginPrompt = mocks.multiselect.mock.calls[1]?.[0] as
+      | {
+          initialValues?: unknown;
+          message?: unknown;
+          options?: Array<{ label?: unknown; value?: unknown }>;
+          required?: unknown;
+        }
+      | undefined;
+    expect(String(pluginPrompt?.message)).toContain("Select native Codex plugins");
+    expect(pluginPrompt?.initialValues).toStrictEqual(["plugin:google-calendar", "plugin:gmail"]);
+    expect(pluginPrompt?.required).toBe(false);
+    expect(pluginPrompt?.options?.map(({ label, value }) => ({ label, value }))).toStrictEqual([
       { value: MIGRATION_SKILL_SELECTION_ACCEPT, label: "Accept recommended" },
       { value: "plugin:google-calendar", label: "google-calendar" },
       { value: "plugin:gmail", label: "gmail" },
@@ -766,6 +780,53 @@ describe("migrateApplyCommand", () => {
     expect(skillOptionsByValue.get("skill:beta")?.label).toBe("beta");
     expect(mocks.promptYesNo).toHaveBeenCalledWith("Apply this migration now?", false);
     expect(mocks.provider.apply).not.toHaveBeenCalled();
+  });
+
+  it("explains skipped plugin selection when Codex subscription auth is required", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    const skillPlan = codexSkillPlan();
+    const warning =
+      "Codex app-backed plugin migration requires the Codex app-server source account to be logged in with a ChatGPT subscription account.";
+    const planned = codexSkillPlan({
+      summary: {
+        total: skillPlan.items.length + 1,
+        planned: skillPlan.summary.planned,
+        migrated: 0,
+        skipped: 1,
+        conflicts: 0,
+        errors: 0,
+        sensitive: 0,
+      },
+      items: [
+        ...skillPlan.items,
+        {
+          id: "plugin:gmail:1",
+          kind: "manual",
+          action: "manual",
+          status: "skipped",
+          reason: "codex_subscription_required",
+          details: { pluginName: "gmail" },
+        },
+      ],
+      warnings: [warning],
+    });
+    mocks.provider.plan.mockResolvedValue(planned);
+    mocks.multiselect.mockResolvedValueOnce([MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF]);
+
+    const result = await migrateDefaultCommand(runtime, { provider: "codex" });
+
+    expect(result.summary.planned).toBe(1);
+    expect(result.summary.skipped).toBe(3);
+    expect(mocks.multiselect).toHaveBeenCalledTimes(1);
+    expect(mocks.promptYesNo).not.toHaveBeenCalled();
+    expect(mocks.provider.apply).not.toHaveBeenCalled();
+    expect(runtime.log).toHaveBeenCalledWith(warning);
+    expect(runtime.log).toHaveBeenCalledWith(
+      "No Codex skills selected; native Codex plugins are not eligible for migration in this run.",
+    );
   });
 
   it("does not apply archive-only Codex migration work after Toggle all off", async () => {
@@ -1163,8 +1224,8 @@ describe("migrateApplyCommand", () => {
 
     expect(mocks.provider.plan).toHaveBeenCalledTimes(1);
     expect(mocks.withProgress).toHaveBeenCalledTimes(2);
-    expect(typeof firstApplyContext()).toBe("object");
-    expect(firstAppliedPlan()).toBe(planned);
+    expect(typeof mocks.provider.apply.mock.calls[0]?.[0]).toBe("object");
+    expect(mocks.provider.apply.mock.calls[0]?.[1]).toBe(planned);
   });
 
   it("fails after writing JSON output when apply reports item errors", async () => {

@@ -1211,6 +1211,7 @@ describe("createTelegramBot", () => {
       ]),
     });
 
+    const storePath = `/tmp/openclaw-telegram-model-display-names-${process.pid}-${Date.now()}.json`;
     const config = {
       agents: {
         defaults: {
@@ -1223,8 +1224,12 @@ describe("createTelegramBot", () => {
           allowFrom: ["*"],
         },
       },
+      session: {
+        store: storePath,
+      },
     } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
 
+    await rm(storePath, { force: true });
     loadConfig.mockReturnValue(config);
     createTelegramBot({
       token: "tok",
@@ -1269,6 +1274,7 @@ describe("createTelegramBot", () => {
       [{ text: "<< Back", callback_data: "mdl_back" }],
     ]);
     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-model-display-names-1");
+    await rm(storePath, { force: true });
   });
 
   it("resets overrides when selecting the configured default model", async () => {
@@ -1821,10 +1827,7 @@ describe("createTelegramBot", () => {
     });
 
     expect(replySpy).toHaveBeenCalledTimes(1);
-    const payload = requireRecord(
-      mockArg(replySpy as unknown as MockCallSource, 0, 0, "reply payload"),
-      "reply payload",
-    );
+    const payload = replySpy.mock.calls[0][0];
     const [conversationContext] = requireArray(
       payload.UntrustedStructuredContext,
       "structured context",

@@ -76,8 +76,6 @@ type OpenAiChatCompletionRequest = {
   user?: unknown;
   max_tokens?: unknown;
   max_completion_tokens?: unknown;
-  temperature?: unknown;
-  top_p?: unknown;
 };
 
 const DEFAULT_OPENAI_CHAT_COMPLETIONS_BODY_BYTES = 20 * 1024 * 1024;
@@ -137,7 +135,7 @@ function buildAgentCommandInput(params: {
   messageChannel: string;
   senderIsOwner: boolean;
   abortSignal?: AbortSignal;
-  streamParams?: { maxTokens?: number; temperature?: number; topP?: number };
+  streamParams?: { maxTokens?: number };
 }) {
   return {
     message: params.prompt.message,
@@ -826,26 +824,7 @@ export async function handleOpenAiHttpRequest(
       : typeof payload.max_tokens === "number"
         ? payload.max_tokens
         : undefined;
-  const temperature = typeof payload.temperature === "number" ? payload.temperature : undefined;
-  const topP = typeof payload.top_p === "number" ? payload.top_p : undefined;
-  const samplingError = validateOpenAiSamplingParams({
-    temperature: payload.temperature,
-    topP: payload.top_p,
-  });
-  if (samplingError) {
-    sendJson(res, 400, {
-      error: { message: samplingError, type: "invalid_request_error" },
-    });
-    return true;
-  }
-  const streamParams =
-    maxTokens !== undefined || temperature !== undefined || topP !== undefined
-      ? {
-          ...(maxTokens !== undefined ? { maxTokens } : {}),
-          ...(temperature !== undefined ? { temperature } : {}),
-          ...(topP !== undefined ? { topP } : {}),
-        }
-      : undefined;
+  const streamParams = maxTokens !== undefined ? { maxTokens } : undefined;
 
   const { agentId, sessionKey, messageChannel } = resolveGatewayRequestContext({
     req,

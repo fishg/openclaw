@@ -115,7 +115,7 @@ describe("package acceptance workflow", () => {
     expect(workflow).toContain("update-channel-switch skill-install update-corrupt-plugin");
     expect(workflow).toContain("update-corrupt-plugin upgrade-survivor");
     expect(workflow).toContain("published-upgrade-survivor");
-    expect(workflow).toContain("published-upgrade-survivor update-restart-auth");
+    expect(workflow).toContain("published-upgrade-survivor root-managed-vps-upgrade update-restart-auth");
     expect(workflow).toContain("plugins-offline plugin-update");
     expect(workflow).toContain("include_release_path_suites=true");
     expect(workflow).not.toContain("telegram_mode requires source=npm");
@@ -431,6 +431,18 @@ describe("package artifact reuse", () => {
     expect(workflow).toMatch(/suite_id: native-live-extensions-moonshot[\s\S]*?advisory: true/u);
     expect(workflow).toContain("OPENCLAW_LIVE_SUITE_ADVISORY: ${{ matrix.advisory }}");
     expect(workflow).toContain("Advisory live suite failed with exit code");
+    for (const jobName of [
+      "validate_live_provider_suites",
+      "validate_live_docker_provider_suites",
+      "validate_live_media_provider_suites",
+    ]) {
+      expect(workflow).toMatch(
+        new RegExp(
+          `${jobName}:[\\s\\S]*?- name: Run \\$\\{\\{ matrix\\.label \\}\\}[\\s\\S]*?shell: bash`,
+          "u",
+        ),
+      );
+    }
     expect(workflow).toMatch(
       /suite_id: live-gateway-advisory-docker-deepseek-fireworks[\s\S]*?advisory: true/u,
     );
@@ -454,6 +466,7 @@ describe("package artifact reuse", () => {
     expect(workflow).toContain("suite_id: native-live-extensions-media-music-minimax");
     expect(workflow).toContain("suite_id: native-live-extensions-media-video");
     expect(workflow).toContain("suite_group: native-live-extensions-media-video");
+    expect(workflow).toContain("add_profile_suite native-live-extensions-media-video-c");
     expect(workflow).toContain("OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=google,minimax");
     expect(workflow).toContain("OPENCLAW_LIVE_VIDEO_GENERATION_PROVIDERS=openai,openrouter,xai");
     expect(workflow).toContain("suite_group: native-live-src-gateway-profiles-opencode-go");
@@ -587,7 +600,7 @@ describe("package artifact reuse", () => {
     );
     expect(workflow).toContain("suite_profile: custom");
     expect(workflow).toContain(
-      "docker_lanes: doctor-switch update-channel-switch skill-install update-corrupt-plugin upgrade-survivor published-upgrade-survivor update-restart-auth plugins-offline plugin-update",
+      "docker_lanes: doctor-switch update-channel-switch skill-install update-corrupt-plugin upgrade-survivor published-upgrade-survivor root-managed-vps-upgrade update-restart-auth plugins-offline plugin-update",
     );
     expect(workflow).toContain(
       "published_upgrade_survivor_baselines: ${{ needs.resolve_target.outputs.run_release_soak == 'true' && 'last-stable-4 2026.4.23 2026.5.2 2026.4.15' || '' }}",
@@ -788,6 +801,7 @@ describe("package artifact reuse", () => {
     const validateStep = workflowStep(job, "Validate inputs and secrets");
     const runStep = workflowStep(job, "Run package Telegram E2E");
 
+    expect(job["timeout-minutes"]).toBe(120);
     expect(currentRunDownload).toEqual({
       if: "inputs.package_artifact_name != '' && inputs.package_artifact_run_id == ''",
       name: "Download package-under-test artifact",

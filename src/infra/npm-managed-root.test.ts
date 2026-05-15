@@ -9,6 +9,7 @@ import {
   readManagedNpmRootInstalledDependency,
   readOpenClawManagedNpmRootOverrides,
   resolveManagedNpmRootDependencySpec,
+  syncManagedNpmRootPeerDependencies,
   upsertManagedNpmRootDependency,
 } from "./npm-managed-root.js";
 
@@ -195,9 +196,168 @@ describe("managed npm root", () => {
     });
   });
 
+  it("updates stale managed peer dependency pins from current plugin peers", async () => {
+    const npmRoot = await makeTempRoot();
+    await fs.writeFile(
+      path.join(npmRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "fixture-runtime": "1.0.0",
+          },
+          openclaw: {
+            managedPeerDependencies: ["fixture-runtime"],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-plugin"), { recursive: true });
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-runtime"), { recursive: true });
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-plugin", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-plugin",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^2.0.0",
+        },
+        peerDependenciesMeta: {},
+      })}\n`,
+    );
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-runtime", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-runtime",
+        version: "1.0.0",
+      })}\n`,
+    );
+
+    await expect(
+      syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        preferredPackageName: "fixture-plugin",
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      fs.readFile(path.join(npmRoot, "package.json"), "utf8").then((raw) => JSON.parse(raw)),
+    ).resolves.toEqual({
+      private: true,
+      dependencies: {
+        "fixture-runtime": "^2.0.0",
+      },
+      openclaw: {
+        managedPeerDependencies: ["fixture-runtime"],
+      },
+    });
+  });
+
+  it("keeps existing managed peer dependency pins during unrelated plugin installs", async () => {
+    const npmRoot = await makeTempRoot();
+    await fs.writeFile(
+      path.join(npmRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "fixture-runtime": "^2.0.0",
+          },
+          openclaw: {
+            managedPeerDependencies: ["fixture-runtime"],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-alpha"), { recursive: true });
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-beta"), { recursive: true });
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-alpha", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-alpha",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^1.0.0",
+        },
+      })}\n`,
+    );
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-beta", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-beta",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^2.0.0",
+        },
+      })}\n`,
+    );
+
+    await expect(
+      syncManagedNpmRootPeerDependencies({
+        npmRoot,
+        preferredPackageName: "fixture-unrelated",
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      fs.readFile(path.join(npmRoot, "package.json"), "utf8").then((raw) => JSON.parse(raw)),
+    ).resolves.toEqual({
+      private: true,
+      dependencies: {
+        "fixture-runtime": "^2.0.0",
+      },
+      openclaw: {
+        managedPeerDependencies: ["fixture-runtime"],
+      },
+    });
+  });
+
+  it("preserves user-owned peer dependency pins while scanning plugin peers", async () => {
+    const npmRoot = await makeTempRoot();
+    await fs.writeFile(
+      path.join(npmRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "fixture-runtime": "1.0.0",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await fs.mkdir(path.join(npmRoot, "node_modules", "fixture-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(npmRoot, "node_modules", "fixture-plugin", "package.json"),
+      `${JSON.stringify({
+        name: "fixture-plugin",
+        version: "1.0.0",
+        peerDependencies: {
+          "fixture-runtime": "^2.0.0",
+        },
+        peerDependenciesMeta: {},
+      })}\n`,
+    );
+
+    await expect(syncManagedNpmRootPeerDependencies({ npmRoot })).resolves.toBe(false);
+
+    await expect(
+      fs.readFile(path.join(npmRoot, "package.json"), "utf8").then((raw) => JSON.parse(raw)),
+    ).resolves.toEqual({
+      private: true,
+      dependencies: {
+        "fixture-runtime": "1.0.0",
+      },
+    });
+  });
+
   it("reads package-level npm overrides for managed plugin installs", async () => {
     await expect(readOpenClawManagedNpmRootOverrides()).resolves.toEqual({
-      "@aws-sdk/client-bedrock-runtime": "3.1045.0",
       axios: "1.16.0",
       "fast-uri": "3.1.2",
       "follow-redirects": "1.16.0",

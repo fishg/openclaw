@@ -352,6 +352,147 @@ describe("install.sh", () => {
     expect(result?.stdout).toContain(`missing=${openclawBin.replace(/ /g, "\\ ")}`);
     expect(result?.stdout).toContain("present=openclaw");
   });
+
+  it("resolves requested git install versions to checkout refs", () => {
+    const result = runInstallShell(`
+      set -euo pipefail
+      source "${SCRIPT_PATH}"
+      npm() {
+        if [[ "$1" == "view" && "$2" == "openclaw" && "$3" == "dist-tags.beta" ]]; then
+          printf '2026.5.12-beta.3\\n'
+          return 0
+        fi
+        return 1
+      }
+      OPENCLAW_VERSION=v2026.5.12-beta.3
+      printf 'tag=%s\\n' "$(resolve_git_openclaw_ref)"
+      OPENCLAW_VERSION=2026.5.12-beta.3
+      printf 'semver=%s\\n' "$(resolve_git_openclaw_ref)"
+      OPENCLAW_VERSION=beta
+      printf 'beta=%s\\n' "$(resolve_git_openclaw_ref)"
+      OPENCLAW_VERSION=main
+      printf 'main=%s\\n' "$(resolve_git_openclaw_ref)"
+    `);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("tag=v2026.5.12-beta.3");
+    expect(result.stdout).toContain("semver=v2026.5.12-beta.3");
+    expect(result.stdout).toContain("beta=v2026.5.12-beta.3");
+    expect(result.stdout).toContain("main=main");
+  });
+
+  it("leaves an existing git checkout on its current ref when git updates are disabled", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "openclaw-install-no-git-update-"));
+    const repo = join(tmp, "repo");
+    const home = join(tmp, "home");
+    mkdirSync(home, { recursive: true });
+    try {
+      expect(spawnSync("git", ["init", repo], { encoding: "utf8" }).status).toBe(0);
+      writeFileSync(join(repo, "README.md"), "fixture\n");
+      expect(spawnSync("git", ["-C", repo, "add", "README.md"], { encoding: "utf8" }).status).toBe(
+        0,
+      );
+      expect(
+        spawnSync(
+          "git",
+          [
+            "-C",
+            repo,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "init",
+          ],
+          {
+            encoding: "utf8",
+          },
+        ).status,
+      ).toBe(0);
+
+      const result = runInstallShell(
+        `
+          set -euo pipefail
+          source "${SCRIPT_PATH}"
+          GIT_UPDATE=0
+          check_git() { return 0; }
+          ensure_pnpm() { :; }
+          ensure_pnpm_binary_for_scripts() { :; }
+          cleanup_legacy_submodules() { :; }
+          activate_repo_pnpm_version() { :; }
+          ensure_user_local_bin_on_path() { mkdir -p "$HOME/.local/bin"; }
+          resolve_git_openclaw_ref() { echo SHOULD_NOT_RESOLVE; }
+          checkout_git_openclaw_ref() { echo CHECKOUT_CALLED; return 0; }
+          run_pnpm() { :; }
+          ui_info() { printf 'info:%s\\n' "$*"; }
+          ui_warn() { printf 'warn:%s\\n' "$*"; }
+          ui_success() { printf 'success:%s\\n' "$*"; }
+          install_openclaw_from_git ${JSON.stringify(repo)}
+        `,
+        {
+          HOME: home,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Git update disabled; leaving existing checkout unchanged");
+      expect(result.stdout).not.toContain("SHOULD_NOT_RESOLVE");
+      expect(result.stdout).not.toContain("CHECKOUT_CALLED");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects existing non-git dirs even when git updates are disabled", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "openclaw-install-no-git-update-non-git-"));
+    const repo = join(tmp, "repo");
+    const home = join(tmp, "home");
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(repo, "README.md"), "fixture\n");
+    try {
+      const result = runInstallShell(
+        `
+          set -euo pipefail
+          source "${SCRIPT_PATH}"
+          GIT_UPDATE=0
+          check_git() { return 0; }
+          ensure_pnpm() { :; }
+          ensure_pnpm_binary_for_scripts() { :; }
+          resolve_git_openclaw_ref() { echo SHOULD_NOT_RESOLVE; }
+          checkout_git_openclaw_ref() { echo CHECKOUT_CALLED; return 0; }
+          ui_error() { printf 'error:%s\\n' "$*"; }
+          install_openclaw_from_git ${JSON.stringify(repo)}
+        `,
+        {
+          HOME: home,
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toContain("Git install dir exists but is not a git repo");
+      expect(result.stdout).not.toContain("SHOULD_NOT_RESOLVE");
+      expect(result.stdout).not.toContain("CHECKOUT_CALLED");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses frozen lockfile installs for git installs", () => {
+    expect(script).toContain(
+      'run_quiet_step "Installing dependencies" run_pnpm -C "$repo_dir" install --frozen-lockfile',
+    );
+  });
+
+  it("aligns pnpm to the checked-out repo packageManager before installing", () => {
+    expect(script).toContain("activate_repo_pnpm_version()");
+    expect(script).toContain('corepack prepare "pnpm@${version}" --activate');
+    expect(script).toContain('activate_repo_pnpm_version "$repo_dir"');
+  });
 });
 
 describe("install.sh macOS Homebrew Node behavior", () => {

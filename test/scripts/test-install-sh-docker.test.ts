@@ -236,7 +236,8 @@ describe("bun global install smoke", () => {
     expect(workflow).toContain("run_fast_install_smoke");
     expect(workflow).toContain("run_full_install_smoke");
     expect(workflow).toContain("timeout 45m docker buildx build");
-    expect(workflow).toContain('timeout 600s docker pull "$IMAGE_REF"');
+    expect(workflow).toContain("for attempt in 1 2; do");
+    expect(workflow).toContain('timeout 1200s docker pull "$IMAGE_REF"');
     expect(workflow).not.toContain('timeout 300s docker pull "$IMAGE_REF"');
     expect(workflow).toContain("--progress=plain");
     expect(workflow).toContain("--load");

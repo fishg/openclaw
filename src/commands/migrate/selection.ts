@@ -7,6 +7,7 @@ export const MIGRATION_PLUGIN_NOT_SELECTED_REASON = "not selected for migration"
 export const MIGRATION_SELECTION_ACCEPT = "__openclaw_migrate_accept_recommended__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_ON = "__openclaw_migrate_toggle_all_on__";
 export const MIGRATION_SELECTION_TOGGLE_ALL_OFF = "__openclaw_migrate_toggle_all_off__";
+export const MIGRATION_SELECTION_SKIP = "__openclaw_migrate_skip_for_now__";
 export const MIGRATION_SKILL_SELECTION_ACCEPT = MIGRATION_SELECTION_ACCEPT;
 export const MIGRATION_SKILL_SELECTION_TOGGLE_ALL_ON = MIGRATION_SELECTION_TOGGLE_ALL_ON;
 export const MIGRATION_SKILL_SELECTION_TOGGLE_ALL_OFF = MIGRATION_SELECTION_TOGGLE_ALL_OFF;

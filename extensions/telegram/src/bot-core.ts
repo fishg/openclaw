@@ -638,6 +638,8 @@ export function createTelegramBotCore(
     allowFrom,
     groupAllowFrom,
     resolveGroupPolicy,
+    resolveGroupActivation,
+    resolveGroupRequireMention,
     resolveTelegramGroupConfig,
     shouldSkipUpdate,
     processMessage,
