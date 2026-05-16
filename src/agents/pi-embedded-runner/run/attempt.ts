@@ -831,9 +831,6 @@ export async function runEmbeddedAttempt(
   const emitPrepStageSummary = (phase: string) => {
     const summary = prepStages.snapshot();
     const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary);
-    if (!shouldWarn && !log.isEnabled("trace")) {
-      return;
-    }
     const message = formatEmbeddedRunStageSummary(
       `[trace:embedded-run] prep stages: runId=${params.runId} sessionId=${params.sessionId} phase=${phase}`,
       summary,
@@ -841,7 +838,7 @@ export async function runEmbeddedAttempt(
     if (shouldWarn) {
       log.warn(message);
     } else {
-      log.trace(message);
+      log.info(message);
     }
   };
   const emitCorePluginToolStageSummary = (
@@ -855,9 +852,6 @@ export async function runEmbeddedAttempt(
       totalThresholdMs: 5_000,
       stageThresholdMs: 2_000,
     });
-    if (!shouldWarn && !log.isEnabled("trace")) {
-      return;
-    }
     const message = formatEmbeddedRunStageSummary(
       `[trace:embedded-run] core-plugin-tool stages: runId=${params.runId} sessionId=${params.sessionId} phase=${phase}`,
       summary,
@@ -865,7 +859,7 @@ export async function runEmbeddedAttempt(
     if (shouldWarn) {
       log.warn(message);
     } else {
-      log.trace(message);
+      log.info(message);
     }
   };
 
@@ -1166,10 +1160,13 @@ export async function runEmbeddedAttempt(
       (params.bootstrapContextRunKind ?? "default") !== "heartbeat" &&
       (await hasCompletedBootstrapTurnForAttempt(params.sessionFile));
     let preloadedBootstrapFiles: WorkspaceBootstrapFile[] | undefined;
+    const bootstrapT0 = Date.now();
     let bootstrapRouting =
       shouldProbeContinuationSkip || isRawModelRun || contextInjectionMode === "never"
         ? await resolveBootstrapRouting()
         : undefined;
+    const bootstrapRoutingMs = Date.now() - bootstrapT0;
+    const bootstrapFilesT0 = Date.now();
     if (
       !isRawModelRun &&
       contextInjectionMode !== "never" &&
@@ -1187,7 +1184,9 @@ export async function runEmbeddedAttempt(
       bootstrapRouting = await resolveBootstrapRouting(preloadedBootstrapFiles);
     }
     bootstrapRouting ??= await resolveBootstrapRouting(preloadedBootstrapFiles);
+    const bootstrapFilesMs = Date.now() - bootstrapFilesT0;
     const bootstrapMode = bootstrapRouting.bootstrapMode;
+    const bootstrapContextT0 = Date.now();
     const {
       bootstrapFiles: hookAdjustedBootstrapFiles,
       contextFiles: resolvedContextFiles,
@@ -1224,6 +1223,16 @@ export async function runEmbeddedAttempt(
         };
       },
     });
+    const bootstrapContextMs = Date.now() - bootstrapContextT0;
+    const bootstrapTotalMs = bootstrapRoutingMs + bootstrapFilesMs + bootstrapContextMs;
+    const bootstrapSubStageMsg =
+      `[trace:embedded-run] bootstrap-context sub-stages: runId=${params.runId} sessionId=${params.sessionId}` +
+      ` routing=${bootstrapRoutingMs}ms files=${bootstrapFilesMs}ms resolveContext=${bootstrapContextMs}ms total=${bootstrapTotalMs}ms`;
+    if (bootstrapTotalMs > 5_000) {
+      log.warn(bootstrapSubStageMsg);
+    } else {
+      log.info(bootstrapSubStageMsg);
+    }
     prepStages.mark("bootstrap-context");
     const remappedContextFiles = remapInjectedContextFilesToWorkspace({
       files: resolvedContextFiles,
@@ -1422,6 +1431,7 @@ export async function runEmbeddedAttempt(
       );
     }
     prepStages.mark("bundle-tools");
+    const bundleToolsPostT0 = Date.now();
     const explicitToolAllowlistSources = collectAttemptExplicitToolAllowlistSources({
       config: params.config,
       sessionKey: params.sessionKey,
@@ -1462,6 +1472,7 @@ export async function runEmbeddedAttempt(
       toolsEnabled,
       disableTools: params.disableTools,
     });
+    const logToolDiagT0 = Date.now();
     logAgentRuntimeToolDiagnostics({
       runtimePlan: params.runtimePlan,
       tools: effectiveTools,
@@ -1473,8 +1484,18 @@ export async function runEmbeddedAttempt(
       modelApi: params.model.api,
       model: params.model,
     });
+    const bundleToolsPostMs = Date.now() - bundleToolsPostT0;
+    const logToolDiagMs = Date.now() - logToolDiagT0;
+    if (bundleToolsPostMs > 100) {
+      log.info(
+        `[trace:embedded-run] bundle-tools post-work: runId=${params.runId} sessionId=${params.sessionId}` +
+          ` toolAllowlist+plan=${bundleToolsPostMs - logToolDiagMs}ms logToolDiag=${logToolDiagMs}ms total=${bundleToolsPostMs}ms`,
+      );
+    }
 
+    const machineNameT0 = Date.now();
     const machineName = await getMachineDisplayName();
+    const machineNameMs = Date.now() - machineNameT0;
     const runtimeChannel = normalizeMessageChannel(params.messageChannel ?? params.messageProvider);
     const runtimeCapabilities = collectRuntimeChannelCapabilities({
       cfg: params.config,
@@ -1524,10 +1545,12 @@ export async function runEmbeddedAttempt(
         })
       : undefined;
 
+    const defaultModelT0 = Date.now();
     const defaultModelRef = resolveDefaultModelForAgent({
       cfg: params.config ?? {},
       agentId: sessionAgentId,
     });
+    const defaultModelMs = Date.now() - defaultModelT0;
     const defaultModelLabel = `${defaultModelRef.provider}/${defaultModelRef.model}`;
     const activeProcessSessions = listActiveProcessSessionReferences({
       scopeKey: resolveProcessToolScopeKey({
@@ -1535,6 +1558,13 @@ export async function runEmbeddedAttempt(
         agentId: sessionAgentId,
       }),
     });
+    if (machineNameMs > 100 || defaultModelMs > 100) {
+      log.info(
+        `[trace:embedded-run] system-prompt pre-work: runId=${params.runId} sessionId=${params.sessionId}` +
+          ` machineName=${machineNameMs}ms defaultModel=${defaultModelMs}ms`,
+      );
+    }
+    const systemPromptT0 = Date.now();
     const { runtimeInfo, userTimezone, userTime, userTimeFormat } = buildSystemPromptParams({
       config: params.config,
       agentId: sessionAgentId,
@@ -1554,6 +1584,7 @@ export async function runEmbeddedAttempt(
         activeProcessSessions,
       },
     });
+    const systemPromptParamsMs = Date.now() - systemPromptT0;
     const isDefaultAgent = sessionAgentId === defaultAgentId;
     const promptMode =
       params.promptMode ??
@@ -1562,12 +1593,15 @@ export async function runEmbeddedAttempt(
     // When toolsAllow is set, use minimal prompt and strip skills catalog
     const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
     const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
+    const openClawReferencesT0 = Date.now();
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
       cwd: effectiveWorkspace,
       moduleUrl: import.meta.url,
     });
+    const openClawReferencesMs = Date.now() - openClawReferencesT0;
+    const heartbeatPromptT0 = Date.now();
     const heartbeatPrompt = shouldInjectHeartbeatPrompt({
       config: params.config,
       agentId: sessionAgentId,
@@ -1581,6 +1615,7 @@ export async function runEmbeddedAttempt(
           defaultAgentId,
         })
       : undefined;
+    const heartbeatPromptMs = Date.now() - heartbeatPromptT0;
     const promptContributionContext = {
       config: params.config,
       agentDir: params.agentDir,
@@ -1593,6 +1628,7 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
       trigger: params.trigger,
     };
+    const promptContributionT0 = Date.now();
     const promptContribution =
       params.runtimePlan?.prompt.resolveSystemPromptContribution(promptContributionContext) ??
       resolveProviderSystemPromptContribution({
@@ -1601,6 +1637,7 @@ export async function runEmbeddedAttempt(
         workspaceDir: effectiveWorkspace,
         context: promptContributionContext,
       });
+    const promptContributionMs = Date.now() - promptContributionT0;
 
     const bootstrapTruncationNotice = buildBootstrapPromptWarningNotice(
       bootstrapPromptWarning.lines,
@@ -1609,6 +1646,7 @@ export async function runEmbeddedAttempt(
       config: params.config,
       agentId: sessionAgentId,
     });
+    const buildAttemptSystemPromptT0 = Date.now();
     const attemptSystemPrompt = buildAttemptSystemPrompt({
       isRawModelRun,
       systemPromptOverrideText,
@@ -1695,8 +1733,20 @@ export async function runEmbeddedAttempt(
       skillsPrompt,
       tools: effectiveTools,
     });
+    const buildAttemptSystemPromptMs = Date.now() - buildAttemptSystemPromptT0;
     const systemPromptOverride = attemptSystemPrompt.systemPromptOverride;
+    const systemPromptOverrideT0 = Date.now();
     let systemPromptText = systemPromptOverride();
+    const systemPromptMs = Date.now() - systemPromptT0;
+    const systemPromptSubStageMsg =
+      `[trace:embedded-run] system-prompt sub-stages: runId=${params.runId} sessionId=${params.sessionId}` +
+      ` buildParams=${systemPromptParamsMs}ms openClawRefs=${openClawReferencesMs}ms heartbeat=${heartbeatPromptMs}ms promptContribution=${promptContributionMs}ms` +
+      ` buildAttemptPrompt=${buildAttemptSystemPromptMs}ms overrideFn=${Date.now() - systemPromptOverrideT0}ms total=${systemPromptMs}ms`;
+    if (systemPromptMs > 5_000) {
+      log.warn(systemPromptSubStageMsg);
+    } else {
+      log.info(systemPromptSubStageMsg);
+    }
     prepStages.mark("system-prompt");
 
     // Keep the session lock scoped to transcript/session mutations. Cold plugin
@@ -1826,6 +1876,7 @@ export async function runEmbeddedAttempt(
 
       // Sets compaction/pruning runtime state and returns extension factories
       // that must be passed to the resource loader for the safeguard to be active.
+      const resourceLoaderT0 = Date.now();
       const extensionFactories = buildEmbeddedExtensionFactories({
         cfg: params.config,
         sessionManager,
@@ -1833,13 +1884,16 @@ export async function runEmbeddedAttempt(
         modelId: params.modelId,
         model: params.model,
       });
+      const extensionFactoriesMs = Date.now() - resourceLoaderT0;
       const resourceLoader = createEmbeddedPiResourceLoader({
         cwd: resolvedWorkspace,
         agentDir,
         settingsManager,
         extensionFactories,
       });
+      const resourceLoaderReloadT0 = Date.now();
       await resourceLoader.reload();
+      const resourceLoaderReloadMs = Date.now() - resourceLoaderReloadT0;
       // DefaultResourceLoader.reload() rehydrates settings from disk and can drop OpenClaw
       // compaction overrides applied in createPreparedEmbeddedPiSettingsManager — same
       // rehydration also restores Pi's auto-compaction (openclaw#75799), so re-apply
@@ -1850,6 +1904,15 @@ export async function runEmbeddedAttempt(
         contextTokenBudget: params.contextTokenBudget,
       });
       applyPiAutoCompactionGuard(piAutoCompactionGuardArgs);
+      const resourceLoaderTotalMs = Date.now() - resourceLoaderT0;
+      const resourceLoaderSubStageMsg =
+        `[trace:embedded-run] session-resource-loader sub-stages: runId=${params.runId} sessionId=${params.sessionId}` +
+        ` extensionFactories=${extensionFactoriesMs}ms reload=${resourceLoaderReloadMs}ms total=${resourceLoaderTotalMs}ms`;
+      if (resourceLoaderTotalMs > 5_000) {
+        log.warn(resourceLoaderSubStageMsg);
+      } else {
+        log.info(resourceLoaderSubStageMsg);
+      }
       prepStages.mark("session-resource-loader");
 
       // Get hook runner early so it's available when creating tools

@@ -411,11 +411,21 @@ export async function runEmbeddedPiAgent(
 
   throwIfAborted();
 
+  const enqueueRequestedAt = Date.now();
   return enqueueSession(() => {
     throwIfAborted();
+    const sessionLaneWaitMs = Date.now() - enqueueRequestedAt;
+    const sessionLaneEnteredAt = Date.now();
     return enqueueGlobal(async () => {
       throwIfAborted();
+      const globalLaneWaitMs = Date.now() - sessionLaneEnteredAt;
       const started = Date.now();
+      const laneWaitMsg = `[trace:embedded-run] lane-wait: runId=${params.runId} sessionId=${params.sessionId} sessionLaneWaitMs=${sessionLaneWaitMs} globalLaneWaitMs=${globalLaneWaitMs} totalQueueWaitMs=${Date.now() - enqueueRequestedAt}`;
+      if (sessionLaneWaitMs > 500 || globalLaneWaitMs > 500) {
+        log.warn(laneWaitMsg);
+      } else {
+        log.info(laneWaitMsg);
+      }
       const startupStages = createEmbeddedRunStageTracker();
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
@@ -430,9 +440,6 @@ export async function runEmbeddedPiAgent(
       const emitStartupStageSummary = (phase: string) => {
         const summary = startupStages.snapshot();
         const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary);
-        if (!shouldWarn && !log.isEnabled("trace")) {
-          return;
-        }
         const message = formatEmbeddedRunStageSummary(
           `[trace:embedded-run] startup stages: runId=${params.runId} sessionId=${params.sessionId} phase=${phase}`,
           summary,
@@ -440,7 +447,7 @@ export async function runEmbeddedPiAgent(
         if (shouldWarn) {
           log.warn(message);
         } else {
-          log.trace(message);
+          log.info(message);
         }
       };
       params.onExecutionStarted?.();

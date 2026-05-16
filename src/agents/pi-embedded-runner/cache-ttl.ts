@@ -86,7 +86,11 @@ export function readLastCacheTtlTimestamp(
   try {
     const entries = sm.getEntries();
     let last: number | null = null;
-    for (let i = entries.length - 1; i >= 0; i--) {
+    // Cache-TTL entries are written at the end of each turn, so the most recent
+    // one is always near the tail. Cap the scan to avoid O(n) cost over very
+    // long sessions (which manifests as 1–2s wall time per embedded run).
+    const scanStart = Math.max(0, entries.length - 200);
+    for (let i = entries.length - 1; i >= scanStart; i--) {
       const entry = entries[i];
       if (entry?.type !== "custom" || entry?.customType !== CACHE_TTL_CUSTOM_TYPE) {
         continue;
