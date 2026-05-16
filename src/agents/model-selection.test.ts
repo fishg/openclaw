@@ -733,6 +733,39 @@ describe("model-selection", () => {
       ).toBe("kilocode");
     });
 
+    it("can disable manifest normalization for configured provider inference", () => {
+      const cfg = {
+        models: {
+          providers: {
+            anthropic: {
+              models: [{ id: "opus-4.6" }],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      expect(
+        inferUniqueProviderFromConfiguredModels({
+          cfg,
+          model: "claude-opus-4-6",
+        }),
+      ).toBe("anthropic");
+      expect(
+        inferUniqueProviderFromConfiguredModels({
+          cfg,
+          model: "opus-4.6",
+          allowManifestNormalization: false,
+        }),
+      ).toBe("anthropic");
+      expect(
+        inferUniqueProviderFromConfiguredModels({
+          cfg,
+          model: "claude-opus-4-6",
+          allowManifestNormalization: false,
+        }),
+      ).toBeUndefined();
+    });
+
     it("returns undefined when provider catalog matches are ambiguous", () => {
       const cfg = {
         models: {
@@ -757,6 +790,28 @@ describe("model-selection", () => {
   });
 
   describe("buildConfiguredModelCatalog", () => {
+    it("can disable manifest normalization for configured provider catalog ids", () => {
+      const cfg = {
+        models: {
+          providers: {
+            anthropic: {
+              models: [
+                {
+                  id: "opus-4.6",
+                  name: "Opus 4.6",
+                },
+              ],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      expect(buildConfiguredModelCatalog({ cfg })[0]?.id).toBe("claude-opus-4-6");
+      expect(buildConfiguredModelCatalog({ cfg, allowManifestNormalization: false })[0]?.id).toBe(
+        "opus-4.6",
+      );
+    });
+
     it("emits canonical Google Gemini 3.1 provider model ids", () => {
       const cfg = {
         models: {
@@ -851,6 +906,35 @@ describe("model-selection", () => {
           alias: "sonnet",
         },
       ]);
+    });
+
+    it("can disable manifest normalization for allowlist parsing", () => {
+      const cfg = {
+        agents: {
+          defaults: {
+            models: {
+              "anthropic/opus-4.6": {},
+            },
+          },
+        },
+      } as OpenClawConfig;
+
+      const normalized = buildAllowedModelSet({
+        cfg,
+        catalog: [],
+        defaultProvider: "anthropic",
+      });
+      const disabled = buildAllowedModelSet({
+        cfg,
+        catalog: [],
+        defaultProvider: "anthropic",
+        allowManifestNormalization: false,
+        allowPluginNormalization: false,
+      });
+
+      expect(normalized.allowedKeys.has("anthropic/claude-opus-4-6")).toBe(true);
+      expect(disabled.allowedKeys.has("anthropic/opus-4.6")).toBe(true);
+      expect(disabled.allowedKeys.has("anthropic/claude-opus-4-6")).toBe(false);
     });
 
     it("overlays configured provider metadata and alias onto matching catalog entries", () => {
@@ -1585,8 +1669,8 @@ describe("model-selection", () => {
         });
 
         expect(result).toEqual({ provider: "google", model: "claude-3-5-sonnet" });
-        expect(warnSpy).toHaveBeenCalledWith(
-          '[model-selection] Model "claude-3-5-sonnet" specified without provider. Falling back to "google/claude-3-5-sonnet". Please use "google/claude-3-5-sonnet" in your config.',
+        expect(String(warnSpy.mock.calls[0]?.[0])).toContain(
+          'Model "claude-3-5-sonnet" specified without provider. Falling back to "google/claude-3-5-sonnet". Please use "google/claude-3-5-sonnet" in your config.',
         );
       } finally {
         warnSpy.mockRestore();
@@ -1766,6 +1850,26 @@ describe("model-selection", () => {
       });
     });
 
+    it("can disable manifest normalization for default model refs", () => {
+      const cfg = {
+        agents: {
+          defaults: {
+            model: { primary: "anthropic/opus-4.6" },
+          },
+        },
+      } as OpenClawConfig;
+
+      const result = resolveConfiguredModelRef({
+        cfg,
+        defaultProvider: "anthropic",
+        defaultModel: "claude-opus-4-6",
+        allowManifestNormalization: false,
+        allowPluginNormalization: false,
+      });
+
+      expect(result).toEqual({ provider: "anthropic", model: "opus-4.6" });
+    });
+
     it("preserves exact configured provider ids before legacy alias normalization", () => {
       const cfg = {
         agents: {
@@ -1864,8 +1968,8 @@ describe("model-selection", () => {
         });
 
         expect(result).toEqual({ provider: "openai", model: "gpt-5.4" });
-        expect(warnSpy).toHaveBeenCalledWith(
-          '[model-selection] Model "openai/" could not be resolved. Falling back to default "openai/gpt-5.4".',
+        expect(String(warnSpy.mock.calls[0]?.[0])).toContain(
+          'Model "openai/" could not be resolved. Falling back to default "openai/gpt-5.4".',
         );
       } finally {
         warnSpy.mockRestore();

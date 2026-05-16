@@ -29,6 +29,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     getThinkingLevel: vi.fn(() => "medium"),
     setThinkingLevel: vi.fn(),
   })),
+  loadExtensionFromFactory: vi.fn(async (factory, _cwd, eventBus, _runtime, extensionPath) => {
+    await factory({
+      on: vi.fn(),
+      registerTool: vi.fn(),
+      events: eventBus,
+    });
+    return { path: extensionPath };
+  }),
 }));
 
 describe("createEmbeddedPiResourceLoader", () => {

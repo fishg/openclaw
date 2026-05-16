@@ -376,6 +376,7 @@ describe("provider-runtime", () => {
   beforeEach(() => {
     resetPluginRuntimeStateForTest();
     providerRuntimeTesting.resetExternalAuthFallbackWarningCacheForTest();
+    providerRuntimeTesting.resetProviderRuntimeNormalizationCacheForTest();
     resolvePluginProvidersMock.mockReset();
     resolvePluginProvidersMock.mockReturnValue([]);
     isPluginProvidersLoadInFlightMock.mockReset();
@@ -1182,6 +1183,41 @@ describe("provider-runtime", () => {
       }),
     ).toBe("gemini-3.1-flash-lite-preview");
     expect(resolvePluginProvidersMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches provider model id normalization until the active registry changes", () => {
+    const normalizeModelId = vi.fn(({ modelId }: { modelId: string }) => `${modelId}-normalized`);
+    const provider: ProviderPlugin = {
+      id: DEMO_PROVIDER_ID,
+      label: "Demo",
+      auth: [],
+      normalizeModelId,
+    };
+    const registry = createEmptyPluginRegistry();
+    registry.providers.push({
+      pluginId: DEMO_PROVIDER_ID,
+      provider,
+      source: "test",
+    });
+    setActivePluginRegistry(registry, "startup-registry", "gateway-bindable", "/tmp/workspace");
+
+    const params = {
+      provider: DEMO_PROVIDER_ID,
+      workspaceDir: "/tmp/workspace",
+      context: {
+        provider: DEMO_PROVIDER_ID,
+        modelId: "demo-model-legacy",
+      },
+    };
+
+    expect(normalizeProviderModelIdWithPlugin(params)).toBe("demo-model-legacy-normalized");
+    expect(normalizeProviderModelIdWithPlugin(params)).toBe("demo-model-legacy-normalized");
+    expect(normalizeModelId).toHaveBeenCalledTimes(1);
+
+    setActivePluginRegistry(registry, "startup-registry", "gateway-bindable", "/tmp/workspace");
+
+    expect(normalizeProviderModelIdWithPlugin(params)).toBe("demo-model-legacy-normalized");
+    expect(normalizeModelId).toHaveBeenCalledTimes(2);
   });
 
   it("resolves config hooks through hook-only aliases without changing provider surfaces", () => {

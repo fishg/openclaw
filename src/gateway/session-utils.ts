@@ -17,7 +17,9 @@ import {
   type ModelCatalogEntry,
 } from "../agents/model-catalog.js";
 import {
+  buildModelAliasIndex,
   inferUniqueProviderFromConfiguredModels,
+  type ModelAliasIndex,
   isCliProvider,
   normalizeStoredOverrideModel,
   parseModelRef,
@@ -57,7 +59,9 @@ import {
 } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { openRootFileSync } from "../infra/boundary-file-read.js";
+import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { projectPluginSessionExtensionsSync } from "../plugins/host-hook-state.js";
+import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import {
   DEFAULT_AGENT_ID,
   normalizeAgentId,
@@ -368,7 +372,33 @@ function shouldKeepStoreOnlyChildLink(entry: SessionEntry, now: number): boolean
   );
 }
 
+type GatewayModelNormalizationOptions = {
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
+};
+
+function resolveGatewayManifestPlugins(
+  cfg: OpenClawConfig,
+  options?: GatewayModelNormalizationOptions,
+): readonly Pick<PluginManifestRecord, "modelIdNormalization">[] | undefined {
+  if (options?.manifestPlugins) {
+    return options.manifestPlugins;
+  }
+  if (options?.allowManifestNormalization === false) {
+    return undefined;
+  }
+  return getCurrentPluginMetadataSnapshot({
+    config: cfg,
+    env: process.env,
+    allowWorkspaceScopedSnapshot: true,
+  })?.plugins;
+}
+
 type SessionListRowContext = {
+  aliasIndex: ModelAliasIndex;
+  defaultModelByAgentId: Map<string, ReturnType<typeof resolveDefaultModelForAgent>>;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
   subagentRuns: ReturnType<typeof buildSubagentRunReadIndex>;
   storeChildSessionsByKey: Map<string, string[]>;
   selectedModelByOverrideRef: Map<string, ReturnType<typeof resolveSessionModelRef>>;
@@ -488,16 +518,61 @@ function buildStoreChildSessionIndex(
 }
 
 function buildSessionListRowContext(params: {
+  cfg: OpenClawConfig;
   store: Record<string, SessionEntry>;
   now: number;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): SessionListRowContext {
   const subagentRuns = buildSubagentRunReadIndex(params.now);
   return {
+    aliasIndex: buildModelAliasIndex({
+      cfg: params.cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+      allowManifestNormalization: params.manifestPlugins ? undefined : false,
+      allowPluginNormalization: false,
+      manifestPlugins: params.manifestPlugins,
+    }),
+    defaultModelByAgentId: new Map(),
+    ...(params.manifestPlugins ? { manifestPlugins: params.manifestPlugins } : {}),
     subagentRuns,
     storeChildSessionsByKey: buildStoreChildSessionIndex(params.store, params.now, subagentRuns),
     selectedModelByOverrideRef: new Map(),
     thinkingMetadataByModelRef: new Map(),
   };
+}
+
+function resolveSessionListDefaultModelRef(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  rowContext?: SessionListRowContext;
+  allowPluginNormalization?: boolean;
+  normalization?: GatewayModelNormalizationOptions;
+}): ReturnType<typeof resolveDefaultModelForAgent> {
+  if (!params.rowContext) {
+    return resolveDefaultModelForAgent({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      allowManifestNormalization: params.normalization?.allowManifestNormalization,
+      allowPluginNormalization:
+        params.normalization?.allowPluginNormalization ?? params.allowPluginNormalization,
+      manifestPlugins: params.normalization?.manifestPlugins,
+    });
+  }
+  const agentId = normalizeAgentId(params.agentId);
+  const cached = params.rowContext.defaultModelByAgentId.get(agentId);
+  if (cached) {
+    return cached;
+  }
+  const resolved = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId,
+    aliasIndex: params.rowContext.aliasIndex,
+    allowManifestNormalization: params.rowContext.manifestPlugins ? undefined : false,
+    allowPluginNormalization: false,
+    manifestPlugins: params.rowContext.manifestPlugins,
+  });
+  params.rowContext.defaultModelByAgentId.set(agentId, resolved);
+  return resolved;
 }
 
 function createSessionRowModelCacheKey(provider: string | undefined, model: string | undefined) {
@@ -510,6 +585,7 @@ function resolveSessionSelectedModelRef(params: {
   agentId: string;
   rowContext?: SessionListRowContext;
   allowPluginNormalization?: boolean;
+  normalization?: GatewayModelNormalizationOptions;
 }): ReturnType<typeof resolveSessionModelRef> | null {
   const override = normalizeStoredOverrideModel({
     providerOverride: params.entry?.providerOverride,
@@ -518,9 +594,12 @@ function resolveSessionSelectedModelRef(params: {
   if (!override.modelOverride) {
     return null;
   }
-  if (!params.rowContext) {
+  if (!params.rowContext || params.allowPluginNormalization !== false) {
     return resolveSessionModelRef(params.cfg, params.entry, params.agentId, {
-      allowPluginNormalization: params.allowPluginNormalization,
+      allowManifestNormalization: params.normalization?.allowManifestNormalization,
+      allowPluginNormalization:
+        params.normalization?.allowPluginNormalization ?? params.allowPluginNormalization,
+      manifestPlugins: params.normalization?.manifestPlugins ?? params.rowContext?.manifestPlugins,
     });
   }
   const key = [
@@ -533,7 +612,14 @@ function resolveSessionSelectedModelRef(params: {
     return cached;
   }
   const selected = resolveSessionModelRef(params.cfg, params.entry, params.agentId, {
-    allowPluginNormalization: params.allowPluginNormalization,
+    defaultRef: resolveSessionListDefaultModelRef({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      rowContext: params.rowContext,
+    }),
+    allowManifestNormalization: params.rowContext.manifestPlugins ? undefined : false,
+    allowPluginNormalization: false,
+    manifestPlugins: params.rowContext.manifestPlugins,
   });
   params.rowContext.selectedModelByOverrideRef.set(key, selected);
   return selected;
@@ -961,7 +1047,10 @@ function resolveGatewayAgentModel(
   };
 }
 
-export function listAgentsForGateway(cfg: OpenClawConfig): {
+export function listAgentsForGateway(
+  cfg: OpenClawConfig,
+  options: GatewayModelNormalizationOptions = {},
+): {
   defaultId: string;
   mainKey: string;
   scope: SessionScope;
@@ -1008,10 +1097,25 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   if (mainKey && !agentIds.includes(mainKey) && (!allowedIds || allowedIds.has(mainKey))) {
     agentIds = [...agentIds, mainKey];
   }
+  const manifestPlugins = resolveGatewayManifestPlugins(cfg, options);
+  const aliasIndex = buildModelAliasIndex({
+    cfg,
+    defaultProvider: DEFAULT_PROVIDER,
+    allowManifestNormalization: manifestPlugins ? options.allowManifestNormalization : false,
+    allowPluginNormalization: false,
+    manifestPlugins,
+  });
   const agents = agentIds.map((id) => {
     const meta = configuredById.get(id);
     const model = resolveGatewayAgentModel(cfg, id);
-    const resolvedModel = resolveDefaultModelForAgent({ cfg, agentId: id });
+    const resolvedModel = resolveDefaultModelForAgent({
+      cfg,
+      agentId: id,
+      aliasIndex,
+      allowManifestNormalization: manifestPlugins ? options.allowManifestNormalization : false,
+      allowPluginNormalization: false,
+      manifestPlugins,
+    });
     return Object.assign(
       {
         id,
@@ -1297,13 +1401,15 @@ export function resolveGatewaySessionThinkingDefault(params: {
 export function getSessionDefaults(
   cfg: OpenClawConfig,
   modelCatalog?: ModelCatalogEntry[],
-  options?: { allowPluginNormalization?: boolean },
+  options?: GatewayModelNormalizationOptions,
 ): GatewaySessionsDefaults {
   const resolved = resolveConfiguredModelRef({
     cfg,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
+    allowManifestNormalization: options?.allowManifestNormalization,
     allowPluginNormalization: options?.allowPluginNormalization,
+    manifestPlugins: options?.manifestPlugins,
   });
   const contextTokens =
     cfg.agents?.defaults?.contextTokens ??
@@ -1331,7 +1437,9 @@ export function resolveSessionModelRef(
     | SessionEntry
     | Pick<SessionEntry, "model" | "modelProvider" | "modelOverride" | "providerOverride">,
   agentId?: string,
-  options?: { allowPluginNormalization?: boolean },
+  options?: {
+    defaultRef?: { provider: string; model: string };
+  } & GatewayModelNormalizationOptions,
 ): { provider: string; model: string } {
   const normalizedOverride = normalizeStoredOverrideModel({
     providerOverride: entry?.providerOverride,
@@ -1342,7 +1450,9 @@ export function resolveSessionModelRef(
       defaultProvider: normalizedOverride.providerOverride,
       overrideProvider: normalizedOverride.providerOverride,
       overrideModel: normalizedOverride.modelOverride,
+      allowManifestNormalization: options?.allowManifestNormalization,
       allowPluginNormalization: options?.allowPluginNormalization,
+      manifestPlugins: options?.manifestPlugins,
     })!;
   }
   const runtimeProvider = normalizeOptionalString(entry?.modelProvider);
@@ -1351,18 +1461,24 @@ export function resolveSessionModelRef(
     return { provider: runtimeProvider, model: runtimeModel };
   }
 
-  const resolved = agentId
-    ? resolveDefaultModelForAgent({
-        cfg,
-        agentId,
-        allowPluginNormalization: options?.allowPluginNormalization,
-      })
-    : resolveConfiguredModelRef({
-        cfg,
-        defaultProvider: DEFAULT_PROVIDER,
-        defaultModel: DEFAULT_MODEL,
-        allowPluginNormalization: options?.allowPluginNormalization,
-      });
+  const resolved =
+    options?.defaultRef ??
+    (agentId
+      ? resolveDefaultModelForAgent({
+          cfg,
+          agentId,
+          allowManifestNormalization: options?.allowManifestNormalization,
+          allowPluginNormalization: options?.allowPluginNormalization,
+          manifestPlugins: options?.manifestPlugins,
+        })
+      : resolveConfiguredModelRef({
+          cfg,
+          defaultProvider: DEFAULT_PROVIDER,
+          defaultModel: DEFAULT_MODEL,
+          allowManifestNormalization: options?.allowManifestNormalization,
+          allowPluginNormalization: options?.allowPluginNormalization,
+          manifestPlugins: options?.manifestPlugins,
+        }));
 
   const persisted = resolvePersistedSelectedModelRef({
     defaultProvider: resolved.provider || DEFAULT_PROVIDER,
@@ -1370,7 +1486,9 @@ export function resolveSessionModelRef(
     runtimeModel,
     overrideProvider: normalizedOverride.providerOverride,
     overrideModel: normalizedOverride.modelOverride,
+    allowManifestNormalization: options?.allowManifestNormalization,
     allowPluginNormalization: options?.allowPluginNormalization,
+    manifestPlugins: options?.manifestPlugins,
   });
   if (persisted) {
     return persisted;
@@ -1458,7 +1576,9 @@ export function resolveSessionModelIdentityRef(
     | Pick<SessionEntry, "model" | "modelProvider" | "modelOverride" | "providerOverride">,
   agentId?: string,
   fallbackModelRef?: string,
-  options?: { allowPluginNormalization?: boolean },
+  options?: {
+    defaultRef?: { provider: string; model: string };
+  } & GatewayModelNormalizationOptions,
 ): { provider?: string; model: string } {
   const runtimeModel = entry?.model?.trim();
   const runtimeProvider = entry?.modelProvider?.trim();
@@ -1475,7 +1595,9 @@ export function resolveSessionModelIdentityRef(
     }
     if (runtimeModel.includes("/")) {
       const parsedRuntime = parseModelRef(runtimeModel, DEFAULT_PROVIDER, {
+        allowManifestNormalization: options?.allowManifestNormalization,
         allowPluginNormalization: options?.allowPluginNormalization,
+        manifestPlugins: options?.manifestPlugins,
       });
       if (parsedRuntime) {
         return { provider: parsedRuntime.provider, model: parsedRuntime.model };
@@ -1487,7 +1609,9 @@ export function resolveSessionModelIdentityRef(
   const fallbackRef = fallbackModelRef?.trim();
   if (fallbackRef) {
     const parsedFallback = parseModelRef(fallbackRef, DEFAULT_PROVIDER, {
+      allowManifestNormalization: options?.allowManifestNormalization,
       allowPluginNormalization: options?.allowPluginNormalization,
+      manifestPlugins: options?.manifestPlugins,
     });
     if (parsedFallback) {
       return { provider: parsedFallback.provider, model: parsedFallback.model };
@@ -1502,7 +1626,10 @@ export function resolveSessionModelIdentityRef(
     return { model: fallbackRef };
   }
   const resolved = resolveSessionModelRef(cfg, entry, agentId, {
+    defaultRef: options?.defaultRef,
+    allowManifestNormalization: options?.allowManifestNormalization,
     allowPluginNormalization: options?.allowPluginNormalization,
+    manifestPlugins: options?.manifestPlugins,
   });
   return { provider: resolved.provider, model: resolved.model };
 }
@@ -1512,6 +1639,8 @@ export function resolveSessionDisplayModelIdentityRef(params: {
   agentId: string;
   provider?: string;
   model?: string;
+  defaultRef?: { provider: string; model: string };
+  normalization?: GatewayModelNormalizationOptions;
 }): { provider?: string; model?: string } {
   const provider = normalizeOptionalString(params.provider);
   const model = normalizeOptionalString(params.model);
@@ -1519,9 +1648,21 @@ export function resolveSessionDisplayModelIdentityRef(params: {
     return { provider, model };
   }
 
-  const defaultRef = resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId });
+  const defaultRef =
+    params.defaultRef ??
+    resolveDefaultModelForAgent({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      allowManifestNormalization: params.normalization?.allowManifestNormalization,
+      allowPluginNormalization: params.normalization?.allowPluginNormalization,
+      manifestPlugins: params.normalization?.manifestPlugins,
+    });
   if (model.includes("/")) {
-    const parsedModel = parseModelRef(model, defaultRef.provider);
+    const parsedModel = parseModelRef(model, defaultRef.provider, {
+      allowManifestNormalization: params.normalization?.allowManifestNormalization,
+      allowPluginNormalization: params.normalization?.allowPluginNormalization,
+      manifestPlugins: params.normalization?.manifestPlugins,
+    });
     if (parsedModel && !isCliProvider(parsedModel.provider, params.cfg)) {
       return parsedModel;
     }
@@ -1535,7 +1676,11 @@ export function resolveSessionDisplayModelIdentityRef(params: {
     return { provider: inferredProvider, model };
   }
 
-  const parsedModel = parseModelRef(model, defaultRef.provider);
+  const parsedModel = parseModelRef(model, defaultRef.provider, {
+    allowManifestNormalization: params.normalization?.allowManifestNormalization,
+    allowPluginNormalization: params.normalization?.allowPluginNormalization,
+    manifestPlugins: params.normalization?.manifestPlugins,
+  });
   if (parsedModel && !isCliProvider(parsedModel.provider, params.cfg)) {
     return parsedModel;
   }
@@ -1561,6 +1706,7 @@ export function buildGatewaySessionRow(params: {
   rowContext?: SessionListRowContext;
   skipTranscriptUsageFallback?: boolean;
   lightweightListRow?: boolean;
+  normalization?: GatewayModelNormalizationOptions;
 }): GatewaySessionRow {
   const { cfg, storePath, store, key, entry } = params;
   const lightweight = params.lightweightListRow === true;
@@ -1644,19 +1790,42 @@ export function buildGatewaySessionRow(params: {
           ? resolveSessionRuntimeMs(subagentRun, now)
           : undefined))
     : undefined;
+  const directRowManifestPlugins = rowContext
+    ? undefined
+    : resolveGatewayManifestPlugins(cfg, params.normalization);
+  const rowNormalization: GatewayModelNormalizationOptions = rowContext?.manifestPlugins
+    ? { manifestPlugins: rowContext.manifestPlugins, allowPluginNormalization: !lightweight }
+    : rowContext
+      ? { allowManifestNormalization: false, allowPluginNormalization: !lightweight }
+      : {
+          allowManifestNormalization: params.normalization?.allowManifestNormalization,
+          allowPluginNormalization: params.normalization?.allowPluginNormalization ?? !lightweight,
+          ...(directRowManifestPlugins ? { manifestPlugins: directRowManifestPlugins } : {}),
+        };
+  const defaultModelRef = resolveSessionListDefaultModelRef({
+    cfg,
+    agentId: sessionAgentId,
+    rowContext,
+    allowPluginNormalization: !lightweight,
+    normalization: rowNormalization,
+  });
   const selectedModel = resolveSessionSelectedModelRef({
     cfg,
     entry,
     agentId: sessionAgentId,
     rowContext,
     allowPluginNormalization: !lightweight,
+    normalization: rowNormalization,
   });
   const resolvedModel = resolveSessionModelIdentityRef(
     cfg,
     entry,
     sessionAgentId,
     subagentRun?.model,
-    { allowPluginNormalization: !lightweight },
+    {
+      defaultRef: defaultModelRef,
+      ...rowNormalization,
+    },
   );
   const runtimeModelPresent =
     Boolean(entry?.model?.trim()) || Boolean(entry?.modelProvider?.trim());
@@ -1726,6 +1895,8 @@ export function buildGatewaySessionRow(params: {
         agentId: sessionAgentId,
         provider: selectedOrRuntimeModelProvider,
         model: selectedOrRuntimeModel,
+        defaultRef: defaultModelRef,
+        normalization: rowNormalization,
       });
   const rowModelProvider = rowModelIdentity.provider;
   const rowModel = rowModelIdentity.model;
@@ -1880,6 +2051,7 @@ export function loadGatewaySessionRow(
     includeLastMessage?: boolean;
     now?: number;
     transcriptUsageMaxBytes?: number;
+    normalization?: GatewayModelNormalizationOptions;
   },
 ): GatewaySessionRow | null {
   const { cfg, storePath, store, entry, canonicalKey } = loadSessionEntry(sessionKey);
@@ -1896,6 +2068,7 @@ export function loadGatewaySessionRow(
     includeDerivedTitles: options?.includeDerivedTitles,
     includeLastMessage: options?.includeLastMessage,
     transcriptUsageMaxBytes: options?.transcriptUsageMaxBytes,
+    normalization: options?.normalization,
   });
 }
 
@@ -2094,14 +2267,16 @@ export function listSessionsFromStore(params: {
   store: Record<string, SessionEntry>;
   modelCatalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
+  options?: GatewayModelNormalizationOptions;
 }): SessionsListResult {
   const { cfg, storePath, store, opts } = params;
+  const manifestPlugins = resolveGatewayManifestPlugins(cfg, params.options);
   const now = Date.now();
   const sessionListTranscriptUsageMaxBytes = 64 * 1024;
   const sessionListTranscriptFieldRows = 100;
   let rowContext: SessionListRowContext | undefined;
   const getRowContext = () => {
-    rowContext ??= buildSessionListRowContext({ store, now });
+    rowContext ??= buildSessionListRowContext({ cfg, store, now, manifestPlugins });
     return rowContext;
   };
   const includeDerivedTitles = opts.includeDerivedTitles === true;
@@ -2142,7 +2317,11 @@ export function listSessionsFromStore(params: {
     totalCount,
     limitApplied,
     hasMore: sessions.length < totalCount,
-    defaults: getSessionDefaults(cfg, params.modelCatalog, { allowPluginNormalization: false }),
+    defaults: getSessionDefaults(cfg, params.modelCatalog, {
+      allowManifestNormalization: manifestPlugins ? undefined : false,
+      allowPluginNormalization: false,
+      manifestPlugins,
+    }),
     sessions,
   };
 }
@@ -2163,14 +2342,16 @@ export async function listSessionsFromStoreAsync(params: {
   store: Record<string, SessionEntry>;
   modelCatalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
+  options?: GatewayModelNormalizationOptions;
 }): Promise<SessionsListResult> {
   const { cfg, storePath, store, opts } = params;
+  const manifestPlugins = resolveGatewayManifestPlugins(cfg, params.options);
   const now = Date.now();
   const sessionListTranscriptUsageMaxBytes = 64 * 1024;
   const sessionListTranscriptFieldRows = 100;
   let rowContext: SessionListRowContext | undefined;
   const getRowContext = () => {
-    rowContext ??= buildSessionListRowContext({ store, now });
+    rowContext ??= buildSessionListRowContext({ cfg, store, now, manifestPlugins });
     return rowContext;
   };
   const includeDerivedTitles = opts.includeDerivedTitles === true;
@@ -2243,7 +2424,11 @@ export async function listSessionsFromStoreAsync(params: {
     totalCount,
     limitApplied,
     hasMore: sessions.length < totalCount,
-    defaults: getSessionDefaults(cfg, params.modelCatalog, { allowPluginNormalization: false }),
+    defaults: getSessionDefaults(cfg, params.modelCatalog, {
+      allowManifestNormalization: manifestPlugins ? undefined : false,
+      allowPluginNormalization: false,
+      manifestPlugins,
+    }),
     sessions,
   };
 }

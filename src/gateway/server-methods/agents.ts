@@ -35,6 +35,7 @@ import type { IdentityConfig } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { root, FsSafeError, type ReadResult } from "../../infra/fs-safe.js";
 import { movePathToTrash } from "../../plugin-sdk/browser-maintenance.js";
+import { getCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-snapshot.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
 import { resolveUserPath } from "../../utils.js";
 import {
@@ -451,7 +452,15 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const cfg = context.getRuntimeConfig();
-    const result = listAgentsForGateway(cfg);
+    const manifestPlugins = getCurrentPluginMetadataSnapshot({
+      config: cfg,
+      env: process.env,
+      allowWorkspaceScopedSnapshot: true,
+    })?.plugins;
+    const result = listAgentsForGateway(
+      cfg,
+      manifestPlugins ? { manifestPlugins } : { allowManifestNormalization: false },
+    );
     respond(true, result, undefined);
   },
   "agents.create": async ({ params, respond, context }) => {

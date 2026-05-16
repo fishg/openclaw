@@ -40,6 +40,7 @@ import {
   measureDiagnosticsTimelineSpanSync,
 } from "../../infra/diagnostics-timeline.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { getCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-snapshot.js";
 import { patchPluginSessionExtension } from "../../plugins/host-hook-state.js";
 import { isPluginJsonValue } from "../../plugins/host-hooks.js";
 import {
@@ -733,6 +734,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
             phase: "sessions.list",
           },
         );
+        const manifestPlugins = getCurrentPluginMetadataSnapshot({
+          config: cfg,
+          env: process.env,
+          allowWorkspaceScopedSnapshot: true,
+        })?.plugins;
         const result = await measureDiagnosticsTimelineSpan(
           "gateway.sessions.list.rows",
           () =>
@@ -742,6 +748,9 @@ export const sessionsHandlers: GatewayRequestHandlers = {
               store: listStore,
               modelCatalog,
               opts: p,
+              options: manifestPlugins
+                ? { manifestPlugins }
+                : { allowManifestNormalization: false },
             }),
           {
             config: cfg,

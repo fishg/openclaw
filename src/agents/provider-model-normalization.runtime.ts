@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 
 type ProviderRuntimeModule = Pick<
   typeof import("../plugins/provider-runtime.js"),
-  "normalizeProviderModelIdWithPlugin"
+  "normalizeProviderModelIdWithPlugin" | "resetProviderRuntimeNormalizationCacheForTest"
 >;
 
 const require = createRequire(import.meta.url);
@@ -41,4 +41,8 @@ export function normalizeProviderModelIdWithRuntime(params: {
   };
 }): string | undefined {
   return loadProviderRuntime()?.normalizeProviderModelIdWithPlugin(params);
+}
+
+export function resetProviderModelNormalizationRuntimeCacheForTest(): void {
+  loadProviderRuntime()?.resetProviderRuntimeNormalizationCacheForTest();
 }

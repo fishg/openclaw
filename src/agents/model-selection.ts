@@ -3,6 +3,7 @@ import {
   resolveAgentModelPrimaryValue,
 } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -93,7 +94,9 @@ export function resolvePersistedOverrideModelRef(params: {
   defaultProvider?: unknown;
   overrideProvider?: unknown;
   overrideModel?: unknown;
+  allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): ModelRef | null {
   const defaultProvider = normalizePersistedDefaultProvider(params.defaultProvider);
   const overrideProvider = normalizeOptionalString(params.overrideProvider);
@@ -104,7 +107,9 @@ export function resolvePersistedOverrideModelRef(params: {
   const encodedOverride = overrideProvider ? `${overrideProvider}/${overrideModel}` : overrideModel;
   return (
     parseModelRef(encodedOverride, defaultProvider, {
+      allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
+      manifestPlugins: params.manifestPlugins,
     }) ?? {
       provider: overrideProvider || defaultProvider,
       model: overrideModel,
@@ -122,7 +127,9 @@ export function resolvePersistedModelRef(params: {
   runtimeModel?: unknown;
   overrideProvider?: unknown;
   overrideModel?: unknown;
+  allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): ModelRef | null {
   const defaultProvider = normalizePersistedDefaultProvider(params.defaultProvider);
   const runtimeProvider = normalizeOptionalString(params.runtimeProvider);
@@ -133,7 +140,9 @@ export function resolvePersistedModelRef(params: {
     }
     return (
       parseModelRef(runtimeModel, defaultProvider, {
+        allowManifestNormalization: params.allowManifestNormalization,
         allowPluginNormalization: params.allowPluginNormalization,
+        manifestPlugins: params.manifestPlugins,
       }) ?? {
         provider: defaultProvider,
         model: runtimeModel,
@@ -144,7 +153,9 @@ export function resolvePersistedModelRef(params: {
     defaultProvider,
     overrideProvider: params.overrideProvider,
     overrideModel: params.overrideModel,
+    allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 }
 
@@ -159,13 +170,17 @@ export function resolvePersistedSelectedModelRef(params: {
   runtimeModel?: unknown;
   overrideProvider?: unknown;
   overrideModel?: unknown;
+  allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): ModelRef | null {
   const override = resolvePersistedOverrideModelRef({
     defaultProvider: params.defaultProvider,
     overrideProvider: params.overrideProvider,
     overrideModel: params.overrideModel,
+    allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
   if (override) {
     return override;
@@ -174,7 +189,9 @@ export function resolvePersistedSelectedModelRef(params: {
     defaultProvider: params.defaultProvider,
     runtimeProvider: params.runtimeProvider,
     runtimeModel: params.runtimeModel,
+    allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 }
 
@@ -204,25 +221,42 @@ export function resolveAllowlistModelKey(
   raw: string,
   defaultProvider: string,
   cfg?: OpenClawConfig,
+  options?: {
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
+    manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
+  },
 ): string | null {
-  return resolveAllowlistModelKeyFromShared({ cfg, raw, defaultProvider });
+  return resolveAllowlistModelKeyFromShared({
+    cfg,
+    raw,
+    defaultProvider,
+    allowManifestNormalization: options?.allowManifestNormalization,
+    allowPluginNormalization: options?.allowPluginNormalization,
+    manifestPlugins: options?.manifestPlugins,
+  });
 }
 
 export function resolveDefaultModelForAgent(params: {
   cfg: OpenClawConfig;
   agentId?: string;
+  aliasIndex?: ModelAliasIndex;
+  allowManifestNormalization?: boolean;
   allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): ModelRef {
-  const agentModelOverride = params.agentId
-    ? resolveAgentEffectiveModelPrimary(params.cfg, params.agentId)
-    : undefined;
-  const resolved = resolveConfiguredModelRef({
+  return resolveConfiguredModelRef({
     cfg: params.cfg,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
+    rawModelOverride: params.agentId
+      ? resolveAgentEffectiveModelPrimary(params.cfg, params.agentId)
+      : undefined,
+    aliasIndex: params.aliasIndex,
+    allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
-  return resolved;
 }
 
 export async function canonicalizeCaseOnlyCatalogModelRef(params: {
@@ -361,6 +395,9 @@ export function buildAllowedModelSet(params: {
   defaultProvider: string;
   defaultModel?: string;
   agentId?: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): {
   allowAny: boolean;
   allowedCatalog: ModelCatalogEntry[];
@@ -375,6 +412,9 @@ export function buildAllowedModelSet(params: {
       cfg: params.cfg,
       agentId: params.agentId,
     }),
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 }
 
@@ -384,6 +424,9 @@ export function getModelRefStatus(params: {
   ref: ModelRef;
   defaultProvider: string;
   defaultModel?: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }): ModelRefStatus {
   return getModelRefStatusWithFallbackModels({
     cfg: params.cfg,
@@ -394,6 +437,9 @@ export function getModelRefStatus(params: {
     fallbackModels: resolveAllowedFallbacks({
       cfg: params.cfg,
     }),
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 }
 
@@ -403,6 +449,9 @@ function getModelRefStatusForResolve(
     catalog: ModelCatalogEntry[];
     defaultProvider: string;
     defaultModel?: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
+    manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
   },
   ref: ModelRef,
 ): ModelRefStatus {
@@ -412,6 +461,9 @@ function getModelRefStatusForResolve(
     ref,
     defaultProvider: params.defaultProvider,
     defaultModel: params.defaultModel,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 }
 
@@ -421,6 +473,9 @@ export function resolveAllowedModelRef(params: {
   raw: string;
   defaultProvider: string;
   defaultModel?: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 }):
   | { ref: ModelRef; key: string }
   | {
@@ -434,12 +489,18 @@ export function resolveAllowedModelRef(params: {
   const aliasIndex = buildModelAliasIndex({
     cfg: params.cfg,
     defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
 
   const openrouterCompatRef = resolveConfiguredOpenRouterCompatAlias({
     cfg: params.cfg,
     raw: trimmed,
     defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
   });
   if (openrouterCompatRef) {
     const status = getModelRefStatusForResolve(params, openrouterCompatRef);
@@ -454,6 +515,9 @@ export function resolveAllowedModelRef(params: {
     raw: params.raw,
     defaultProvider: params.defaultProvider,
     aliasIndex,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
+    manifestPlugins: params.manifestPlugins,
     getStatus: (ref) => getModelRefStatusForResolve(params, ref),
   });
 }

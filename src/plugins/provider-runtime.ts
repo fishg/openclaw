@@ -34,7 +34,10 @@ import {
   resolveExternalAuthProfileProviderPluginIds,
   resolveOwningPluginIdsForProvider,
 } from "./providers.js";
-import { getActivePluginRegistryWorkspaceDirFromState } from "./runtime-state.js";
+import {
+  getActivePluginRegistryVersionFromState,
+  getActivePluginRegistryWorkspaceDirFromState,
+} from "./runtime-state.js";
 import { resolveRuntimeSyntheticAuthProviderRefs } from "./synthetic-auth.runtime.js";
 import { resolveRuntimeTextTransforms } from "./text-transforms.runtime.js";
 import type {
@@ -85,6 +88,51 @@ import type {
 
 const log = createSubsystemLogger("plugins/provider-runtime");
 const warnedExternalAuthFallbackPluginIds = new Set<string>();
+let normalizedProviderModelIdCache = new WeakMap<OpenClawConfig, Map<string, string | null>>();
+const normalizedProviderModelIdDefaultCache = new Map<string, string | null>();
+
+function resolveProviderModelIdNormalizationCacheKey(params: {
+  provider: string;
+  workspaceDir?: string;
+  context: ProviderNormalizeModelIdContext;
+}): string {
+  return JSON.stringify({
+    provider: normalizeProviderId(params.provider),
+    workspaceDir: params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState() ?? "",
+    activePluginRegistryVersion: getActivePluginRegistryVersionFromState(),
+    modelId: params.context.modelId,
+  });
+}
+
+export function resetProviderRuntimeNormalizationCacheForTest(): void {
+  normalizedProviderModelIdCache = new WeakMap();
+  normalizedProviderModelIdDefaultCache.clear();
+}
+
+function resolveCachedProviderModelIdNormalization(params: {
+  provider: string;
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  context: ProviderNormalizeModelIdContext;
+  normalize: () => string | undefined;
+}): string | undefined {
+  const key = resolveProviderModelIdNormalizationCacheKey(params);
+  const cache = params.config
+    ? (normalizedProviderModelIdCache.get(params.config) ??
+      (() => {
+        const next = new Map<string, string | null>();
+        normalizedProviderModelIdCache.set(params.config!, next);
+        return next;
+      })())
+    : normalizedProviderModelIdDefaultCache;
+  if (cache.has(key)) {
+    return cache.get(key) ?? undefined;
+  }
+  const normalized = params.normalize();
+  cache.set(key, normalized ?? null);
+  return normalized;
+}
 
 function matchesProviderPluginRef(provider: ProviderPlugin, providerId: string): boolean {
   const normalized = normalizeProviderId(providerId);
@@ -151,6 +199,7 @@ export {
 
 export const __testing = {
   resetExternalAuthFallbackWarningCacheForTest,
+  resetProviderRuntimeNormalizationCacheForTest,
 } as const;
 
 function resolveProviderPluginsForCatalogHooks(params: {
@@ -426,11 +475,16 @@ export function normalizeProviderModelIdWithPlugin(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderNormalizeModelIdContext;
 }): string | undefined {
-  const plugin = resolveProviderHookPlugin(params);
-  return (
-    normalizeOptionalString(plugin?.normalizeModelId?.(params.context)) ??
-    normalizeProviderModelIdWithManifest(params)
-  );
+  return resolveCachedProviderModelIdNormalization({
+    ...params,
+    normalize: () => {
+      const plugin = resolveProviderHookPlugin(params);
+      return (
+        normalizeOptionalString(plugin?.normalizeModelId?.(params.context)) ??
+        normalizeProviderModelIdWithManifest(params)
+      );
+    },
+  });
 }
 
 export function normalizeProviderTransportWithPlugin(params: {

@@ -39,3 +39,8 @@ export function getActivePluginRegistryWorkspaceDirFromState(): string | undefin
   const state = getPluginRegistryState();
   return state?.workspaceDir ?? undefined;
 }
+
+export function getActivePluginRegistryVersionFromState(): number {
+  const state = getPluginRegistryState();
+  return state?.activeVersion ?? 0;
+}
