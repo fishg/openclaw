@@ -9,7 +9,7 @@ type StaticModelRef = {
   model: string;
 };
 
-type StaticModelNormalizeOptions = {
+export type ProviderModelIdNormalizationOptions = {
   allowManifestNormalization?: boolean;
   manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
 };
@@ -33,7 +33,7 @@ export function modelKey(provider: string, model: string): string {
 export function normalizeStaticProviderModelId(
   provider: string,
   model: string,
-  options: StaticModelNormalizeOptions = {},
+  options: ProviderModelIdNormalizationOptions = {},
 ): string {
   const normalizedProvider = normalizeProviderId(provider);
   if (options.allowManifestNormalization === false) {
@@ -61,7 +61,7 @@ function normalizeBuiltInProviderModelId(provider: string, model: string): strin
 export function normalizeConfiguredProviderCatalogModelId(
   provider: string,
   model: string,
-  options: StaticModelNormalizeOptions = {},
+  options: ProviderModelIdNormalizationOptions = {},
 ): string {
   const providerModel = normalizeStaticProviderModelId(provider, model, options);
   const googlePrefix = "google/";

@@ -33,6 +33,28 @@ async function expectPathMissing(targetPath: string): Promise<void> {
   expect((statError as { code?: unknown }).code).toBe("ENOENT");
 }
 
+function createStalledBodyResponse(params: { headers: HeadersInit; firstChunk: Uint8Array }): {
+  response: Response;
+  cancel: ReturnType<typeof vi.fn>;
+} {
+  const cancel = vi.fn();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(params.firstChunk);
+    },
+    cancel(reason) {
+      cancel(reason);
+    },
+  });
+  return {
+    response: new Response(body, {
+      status: 200,
+      headers: params.headers,
+    }),
+    cancel,
+  };
+}
+
 describe("clawhub helpers", () => {
   const originalHome = process.env.HOME;
 
@@ -330,73 +352,28 @@ describe("clawhub helpers", () => {
           requestedUrl = input instanceof Request ? input.url : String(input);
           return new Response(
             JSON.stringify({
-              package: {
-                name: "@openclaw/diagnostics-otel",
-                displayName: "Diagnostics",
-                family: "code-plugin",
-              },
-              release: {
-                id: "rel_demo",
-                version: "2026.3.22",
-              },
-              trust: {
-                scanStatus: "clean",
-                moderationState: null,
-                blockedFromDownload: false,
-                reasons: [],
-                pending: false,
-                stale: true,
-              },
+              releaseId: "rel_demo",
+              state: "approved",
+              reasonCode: "clean",
+              createdAt: 1774256733107,
+              scanState: "clean",
+              moderationState: "approved",
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         },
       }),
     ).resolves.toEqual({
-      package: {
-        name: "@openclaw/diagnostics-otel",
-        displayName: "Diagnostics",
-        family: "code-plugin",
-      },
-      release: {
-        id: "rel_demo",
-        version: "2026.3.22",
-      },
-      trust: {
-        scanStatus: "clean",
-        moderationState: null,
-        blockedFromDownload: false,
-        reasons: [],
-        pending: false,
-        stale: true,
-      },
+      releaseId: "rel_demo",
+      state: "approved",
+      reasonCode: "clean",
+      createdAt: 1774256733107,
+      scanState: "clean",
+      moderationState: "approved",
     });
     expect(new URL(requestedUrl).pathname).toBe(
       "/api/v1/packages/%40openclaw%2Fdiagnostics-otel/versions/2026.3.22/security",
     );
-  });
-
-  it("rejects malformed package security reports", async () => {
-    await expect(
-      fetchClawHubPackageSecurity({
-        name: "@openclaw/diagnostics-otel",
-        version: "2026.3.22",
-        fetchImpl: async () =>
-          new Response(
-            JSON.stringify({
-              trust: {
-                scanStatus: "clean",
-                moderationState: null,
-                blockedFromDownload: false,
-                reasons: "clean",
-                pending: false,
-                stale: false,
-              },
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-      }),
-    ).rejects.toThrow("expected reasons to be a string array");
   });
 
   it("downloads package archives to sanitized temp paths and cleans them up", async () => {
@@ -506,6 +483,19 @@ describe("clawhub helpers", () => {
     ).rejects.toThrow(/Rate limit exceeded Sign in for higher rate limits\.$/);
   });
 
+  it("wraps malformed successful ClawHub JSON responses", async () => {
+    await expect(
+      searchClawHubSkills({
+        query: "calendar",
+        fetchImpl: async () =>
+          new Response("{not json", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+    ).rejects.toThrow("ClawHub /api/v1/search returned malformed JSON");
+  });
+
   it("annotates 429 errors with the reset hint but no sign-in hint when authenticated", async () => {
     process.env.OPENCLAW_CLAWHUB_TOKEN = "env-token-123";
     await expect(
@@ -536,6 +526,63 @@ describe("clawhub helpers", () => {
           }),
       }),
     ).rejects.toThrow(/Rate limit exceeded$/);
+  });
+
+  it("times out and cancels stalled skill archive body reads", async () => {
+    const stalled = createStalledBodyResponse({
+      firstChunk: new Uint8Array([4]),
+      headers: { "content-type": "application/zip" },
+    });
+
+    await expect(
+      downloadClawHubSkillArchive({
+        slug: "agentreceipt",
+        version: "1.0.0",
+        timeoutMs: 5,
+        fetchImpl: async () => stalled.response,
+      }),
+    ).rejects.toThrow(/skill archive download for agentreceipt body stalled after 5ms/i);
+    expect(stalled.cancel).toHaveBeenCalledTimes(1);
+    expect(stalled.cancel.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
+
+  it("times out and cancels stalled package archive body reads", async () => {
+    const stalled = createStalledBodyResponse({
+      firstChunk: new Uint8Array([1]),
+      headers: { "content-type": "application/zip" },
+    });
+
+    await expect(
+      downloadClawHubPackageArchive({
+        name: "@hyf/zai-external-alpha",
+        version: "0.0.1",
+        timeoutMs: 5,
+        fetchImpl: async () => stalled.response,
+      }),
+    ).rejects.toThrow(
+      /package archive download for @hyf\/zai-external-alpha body stalled after 5ms/i,
+    );
+    expect(stalled.cancel).toHaveBeenCalledTimes(1);
+    expect(stalled.cancel.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
+
+  it("times out and cancels stalled ClawPack artifact body reads", async () => {
+    const stalled = createStalledBodyResponse({
+      firstChunk: new Uint8Array([7]),
+      headers: { "content-type": "application/octet-stream" },
+    });
+
+    await expect(
+      downloadClawHubPackageArchive({
+        name: "demo",
+        version: "1.2.3",
+        artifact: "clawpack",
+        timeoutMs: 5,
+        fetchImpl: async () => stalled.response,
+      }),
+    ).rejects.toThrow(/ClawPack download for demo@1.2.3 body stalled after 5ms/i);
+    expect(stalled.cancel).toHaveBeenCalledTimes(1);
+    expect(stalled.cancel.mock.calls[0]?.[0]).toBeInstanceOf(Error);
   });
 
   it("downloads skill archives to sanitized temp paths and cleans them up", async () => {

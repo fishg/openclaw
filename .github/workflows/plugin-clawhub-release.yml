@@ -587,9 +587,8 @@ jobs:
                 if (response.status !== 429 && response.status < 500) {
                   return response;
                 }
-                lastError = new Error(`HTTP ${response.status}`);
               } catch (error) {
-                lastError = error;
+                lastStatus = error instanceof Error ? error.message : String(error);
               }
               await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
             }

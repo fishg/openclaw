@@ -4,7 +4,11 @@ import type { TelegramNetworkConfig } from "openclaw/plugin-sdk/config-contracts
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { fetchWithTimeout } from "openclaw/plugin-sdk/text-utility-runtime";
 import type { TelegramBotInfo } from "./bot-info.js";
-import { resolveTelegramApiBase, resolveTelegramFetch } from "./fetch.js";
+import {
+  resolveTelegramApiBase,
+  resolveTelegramTransport,
+  type TelegramTransport,
+} from "./fetch.js";
 import { makeProxyFetch } from "./proxy.js";
 
 export type TelegramProbe = BaseProbeResult & {
@@ -37,21 +41,11 @@ export type TelegramProbeOptions = {
   getMeCacheMode?: "success-24h" | "legacy";
 };
 
-const probeFetcherCache = new Map<string, typeof fetch>();
-const MAX_PROBE_FETCHER_CACHE_SIZE = 64;
-const probeSuccessCache = new Map<string, TelegramProbeSuccessCacheEntry>();
-const TELEGRAM_GET_ME_SUCCESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
-type TelegramProbeWebhookInfo = NonNullable<TelegramProbe["webhook"]>;
-type TelegramProbeSuccessCacheEntry = {
-  cachedAtMs: number;
-  botInfo: UserFromGetMe;
-  webhook?: TelegramProbeWebhookInfo;
-};
+const probeTransportCache = new Map<string, TelegramTransport>();
+const MAX_PROBE_TRANSPORT_CACHE_SIZE = 64;
 
 export function resetTelegramProbeFetcherCacheForTests(): void {
-  probeFetcherCache.clear();
-  probeSuccessCache.clear();
+  probeTransportCache.clear();
 }
 
 function resolveProbeOptions(
@@ -66,15 +60,11 @@ function resolveProbeOptions(
   return proxyOrOptions;
 }
 
-function shouldUseProbeFetcherCache(): boolean {
+function shouldUseProbeTransportCache(): boolean {
   return !process.env.VITEST && process.env.NODE_ENV !== "test";
 }
 
-function shouldUseTelegramGetMeSuccessCache(mode: TelegramProbeOptions["getMeCacheMode"]): boolean {
-  return mode !== "legacy";
-}
-
-function buildProbeFetcherCacheKey(token: string, options?: TelegramProbeOptions): string {
+function buildProbeTransportCacheKey(token: string, options?: TelegramProbeOptions): string {
   const cacheIdentity = options?.accountId?.trim() || token;
   const cacheIdentityKind = options?.accountId?.trim() ? "account" : "token";
   const proxyKey = options?.proxyUrl?.trim() ?? "";
@@ -86,169 +76,40 @@ function buildProbeFetcherCacheKey(token: string, options?: TelegramProbeOptions
   return `${cacheIdentityKind}:${cacheIdentity}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}`;
 }
 
-function buildProbeSuccessCacheKey(token: string, options?: TelegramProbeOptions): string {
-  const proxyKey = options?.proxyUrl?.trim() ?? "";
-  const autoSelectFamily = options?.network?.autoSelectFamily;
-  const autoSelectFamilyKey =
-    typeof autoSelectFamily === "boolean" ? String(autoSelectFamily) : "default";
-  const dnsResultOrderKey = options?.network?.dnsResultOrder ?? "default";
-  const apiRootKey = options?.apiRoot?.trim() ?? "";
-  return `${token}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}`;
-}
-
-function setCachedProbeFetcher(cacheKey: string, fetcher: typeof fetch): typeof fetch {
-  probeFetcherCache.set(cacheKey, fetcher);
-  if (probeFetcherCache.size > MAX_PROBE_FETCHER_CACHE_SIZE) {
-    const oldestKey = probeFetcherCache.keys().next().value;
+function setCachedProbeTransport(
+  cacheKey: string,
+  transport: TelegramTransport,
+): TelegramTransport {
+  probeTransportCache.set(cacheKey, transport);
+  if (probeTransportCache.size > MAX_PROBE_TRANSPORT_CACHE_SIZE) {
+    const oldestKey = probeTransportCache.keys().next().value;
     if (oldestKey !== undefined) {
-      probeFetcherCache.delete(oldestKey);
+      probeTransportCache.delete(oldestKey);
     }
   }
-  return fetcher;
+  return transport;
 }
 
-function mapBotInfoToProbeBot(botInfo: UserFromGetMe): NonNullable<TelegramProbe["bot"]> {
-  return {
-    id: botInfo.id ?? null,
-    username: botInfo.username ?? null,
-    canJoinGroups: typeof botInfo.can_join_groups === "boolean" ? botInfo.can_join_groups : null,
-    canReadAllGroupMessages:
-      typeof botInfo.can_read_all_group_messages === "boolean"
-        ? botInfo.can_read_all_group_messages
-        : null,
-    supportsInlineQueries:
-      typeof botInfo.supports_inline_queries === "boolean" ? botInfo.supports_inline_queries : null,
-  };
-}
-
-function buildSuccessfulProbeFromCacheEntry(
-  entry: TelegramProbeSuccessCacheEntry,
-  includeWebhookInfo: boolean,
-): TelegramProbe {
-  return {
-    ok: true,
-    status: null,
-    error: null,
-    elapsedMs: 0,
-    bot: mapBotInfoToProbeBot(entry.botInfo),
-    ...(includeWebhookInfo && entry.webhook ? { webhook: { ...entry.webhook } } : {}),
-  };
-}
-
-function readCachedProbeSuccessEntry(
-  token: string,
-  options?: TelegramProbeOptions,
-): TelegramProbeSuccessCacheEntry | undefined {
-  if (!shouldUseTelegramGetMeSuccessCache(options?.getMeCacheMode)) {
-    return undefined;
-  }
-  const cacheKey = buildProbeSuccessCacheKey(token, options);
-  const cached = probeSuccessCache.get(cacheKey);
-  if (!cached) {
-    return undefined;
-  }
-  if (Date.now() - cached.cachedAtMs > TELEGRAM_GET_ME_SUCCESS_CACHE_TTL_MS) {
-    probeSuccessCache.delete(cacheKey);
-    return undefined;
-  }
-  return cached;
-}
-
-function writeCachedProbeSuccessEntry(
-  token: string,
-  options: TelegramProbeOptions | undefined,
-  params: {
-    botInfo: UserFromGetMe;
-    webhook?: TelegramProbeWebhookInfo;
-  },
-): TelegramProbeSuccessCacheEntry {
-  const cacheKey = buildProbeSuccessCacheKey(token, options);
-  const existing = probeSuccessCache.get(cacheKey);
-  const next: TelegramProbeSuccessCacheEntry = {
-    cachedAtMs: Date.now(),
-    botInfo: params.botInfo,
-    ...(params.webhook
-      ? { webhook: { ...params.webhook } }
-      : existing?.webhook
-        ? { webhook: { ...existing.webhook } }
-        : {}),
-  };
-  probeSuccessCache.set(cacheKey, next);
-  return next;
-}
-
-async function fetchTelegramWebhookInfo(params: {
-  base: string;
-  timeoutBudgetMs: number;
-  deadlineMs: number;
-  fetcher: typeof fetch;
-}): Promise<TelegramProbeWebhookInfo | undefined> {
-  const webhookRemainingBudgetMs = Math.max(0, params.deadlineMs - Date.now());
-  if (webhookRemainingBudgetMs <= 0) {
-    return undefined;
-  }
-  try {
-    const webhookRes = await fetchWithTimeout(
-      `${params.base}/getWebhookInfo`,
-      {},
-      Math.max(1, Math.min(params.timeoutBudgetMs, webhookRemainingBudgetMs)),
-      params.fetcher,
-    );
-    const webhookJson = (await webhookRes.json()) as {
-      ok?: boolean;
-      result?: { url?: string; has_custom_certificate?: boolean };
-    };
-    if (!webhookRes.ok || !webhookJson?.ok) {
-      return undefined;
-    }
-    return {
-      url: webhookJson.result?.url ?? null,
-      hasCustomCert: webhookJson.result?.has_custom_certificate ?? null,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-export function primeTelegramProbeSuccessCacheForTests(params: {
-  token: string;
-  botInfo: UserFromGetMe;
-  options?: TelegramProbeOptions;
-  webhook?: TelegramProbeWebhookInfo;
-}): void {
-  writeCachedProbeSuccessEntry(params.token, params.options, {
-    botInfo: params.botInfo,
-    ...(params.webhook ? { webhook: params.webhook } : {}),
-  });
-}
-
-export function readCachedTelegramBotInfo(params: {
-  token: string;
-  options?: TelegramProbeOptions;
-}): UserFromGetMe | undefined {
-  return readCachedProbeSuccessEntry(params.token, params.options)?.botInfo;
-}
-
-function resolveProbeFetcher(token: string, options?: TelegramProbeOptions): typeof fetch {
-  const cacheEnabled = shouldUseProbeFetcherCache();
-  const cacheKey = cacheEnabled ? buildProbeFetcherCacheKey(token, options) : null;
+function resolveProbeTransport(token: string, options?: TelegramProbeOptions): TelegramTransport {
+  const cacheEnabled = shouldUseProbeTransportCache();
+  const cacheKey = cacheEnabled ? buildProbeTransportCacheKey(token, options) : null;
   if (cacheKey) {
-    const cachedFetcher = probeFetcherCache.get(cacheKey);
-    if (cachedFetcher) {
-      return cachedFetcher;
+    const cached = probeTransportCache.get(cacheKey);
+    if (cached) {
+      return cached;
     }
   }
 
   const proxyUrl = options?.proxyUrl?.trim();
   const proxyFetch = proxyUrl ? makeProxyFetch(proxyUrl) : undefined;
-  const resolved = resolveTelegramFetch(proxyFetch, {
+  const transport = resolveTelegramTransport(proxyFetch, {
     network: options?.network,
   });
 
   if (cacheKey) {
-    return setCachedProbeFetcher(cacheKey, resolved);
+    return setCachedProbeTransport(cacheKey, transport);
   }
-  return resolved;
+  return transport;
 }
 
 function normalizeBoolean(value: unknown): boolean | null {
@@ -296,7 +157,8 @@ export async function probeTelegram(
   const deadlineMs = started + timeoutBudgetMs;
   const options = resolveProbeOptions(proxyOrOptions);
   const includeWebhookInfo = options?.includeWebhookInfo !== false;
-  const fetcher = resolveProbeFetcher(token, options);
+  const transport = resolveProbeTransport(token, options);
+  const fetcher = transport.fetch;
   const apiBase = resolveTelegramApiBase(options?.apiRoot);
   const base = `${apiBase}/bot${token}`;
   const retryDelayMs = Math.max(50, Math.min(1000, Math.floor(timeoutBudgetMs / 5)));
@@ -347,6 +209,10 @@ export async function probeTelegram(
         break;
       } catch (err) {
         fetchError = err;
+        // On timeout or network error, promote the transport to its IPv4
+        // fallback dispatcher so the next retry (and all future probes
+        // sharing this cached transport) skip the stalled IPv6 path.
+        transport.forceFallback?.("probe timeout/network error");
         if (i < 2) {
           const remainingAfterAttemptMs = resolveRemainingBudgetMs();
           if (remainingAfterAttemptMs <= 0) {

@@ -22,12 +22,16 @@ import {
   resolveClawHubInstallSpecsForUpdateChannel,
   resolveNpmInstallSpecsForUpdateChannel,
 } from "../../../plugins/install-channel-specs.js";
-import { resolveDefaultPluginExtensionsDir } from "../../../plugins/install-paths.js";
+import {
+  resolveDefaultPluginExtensionsDir,
+  resolvePluginInstallDir,
+} from "../../../plugins/install-paths.js";
 import { installPluginFromNpmSpec } from "../../../plugins/install.js";
 import { loadInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
 import { writePersistedInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
 import { loadInstalledPluginIndex } from "../../../plugins/installed-plugin-index.js";
 import { buildNpmResolutionInstallFields } from "../../../plugins/installs.js";
+import { readLegacyNpmPluginDeclaration } from "../../../plugins/legacy-npm-declaration.js";
 import { loadManifestMetadataSnapshot } from "../../../plugins/manifest-contract-eligibility.js";
 import type { PluginPackageInstall } from "../../../plugins/manifest.js";
 import {
@@ -366,6 +370,93 @@ function collectDownloadableInstallCandidates(params: {
     }
   }
 
+  for (const candidate of collectLegacyNpmDeclarationInstallCandidates({
+    cfg: params.cfg,
+    env: params.env,
+    configuredPluginIds,
+    missingPluginIds: params.missingPluginIds,
+    blockedPluginIds: params.blockedPluginIds,
+  })) {
+    if (!candidates.has(candidate.pluginId)) {
+      candidates.set(candidate.pluginId, candidate);
+    }
+  }
+
+  return [...candidates.values()].toSorted((left, right) =>
+    left.pluginId.localeCompare(right.pluginId),
+  );
+}
+
+function addLegacyNpmDeclarationInstallCandidate(params: {
+  candidates: Map<string, DownloadableInstallCandidate>;
+  pluginDir: string;
+  configuredPluginIds: ReadonlySet<string>;
+  missingPluginIds: ReadonlySet<string>;
+  blockedPluginIds?: ReadonlySet<string>;
+}): void {
+  const declaration = readLegacyNpmPluginDeclaration(params.pluginDir);
+  if (!declaration) {
+    return;
+  }
+  if (
+    params.blockedPluginIds?.has(declaration.pluginId) ||
+    (!params.configuredPluginIds.has(declaration.pluginId) &&
+      !params.missingPluginIds.has(declaration.pluginId))
+  ) {
+    return;
+  }
+  params.candidates.set(declaration.pluginId, {
+    pluginId: declaration.pluginId,
+    label: declaration.pluginId,
+    npmSpec: declaration.npmSpec,
+    defaultChoice: "npm",
+  });
+}
+
+function collectLegacyNpmDeclarationInstallCandidates(params: {
+  cfg: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  configuredPluginIds: ReadonlySet<string>;
+  missingPluginIds: ReadonlySet<string>;
+  blockedPluginIds?: ReadonlySet<string>;
+}): DownloadableInstallCandidate[] {
+  const candidates = new Map<string, DownloadableInstallCandidate>();
+  const env = params.env ?? process.env;
+  const loadPaths = params.cfg.plugins?.load?.paths;
+  if (Array.isArray(loadPaths)) {
+    for (const rawPath of loadPaths) {
+      if (typeof rawPath !== "string" || !rawPath.trim()) {
+        continue;
+      }
+      addLegacyNpmDeclarationInstallCandidate({
+        candidates,
+        pluginDir: resolveUserPath(rawPath, env),
+        configuredPluginIds: params.configuredPluginIds,
+        missingPluginIds: params.missingPluginIds,
+        blockedPluginIds: params.blockedPluginIds,
+      });
+    }
+  }
+
+  const extensionsDir = resolveDefaultPluginExtensionsDir(env);
+  const configuredOrMissingPluginIds = new Set([
+    ...params.configuredPluginIds,
+    ...params.missingPluginIds,
+  ]);
+  for (const pluginId of configuredOrMissingPluginIds) {
+    try {
+      addLegacyNpmDeclarationInstallCandidate({
+        candidates,
+        pluginDir: resolvePluginInstallDir(pluginId, extensionsDir),
+        configuredPluginIds: params.configuredPluginIds,
+        missingPluginIds: params.missingPluginIds,
+        blockedPluginIds: params.blockedPluginIds,
+      });
+    } catch {
+      continue;
+    }
+  }
+
   return [...candidates.values()].toSorted((left, right) =>
     left.pluginId.localeCompare(right.pluginId),
   );
@@ -506,7 +597,6 @@ async function installCandidate(params: {
   const { candidate } = params;
   const extensionsDir = resolveDefaultPluginExtensionsDir();
   const changes: string[] = [];
-  const warnings: string[] = [];
   const clawhubSpecs = candidate.clawhubSpec
     ? resolveClawHubInstallSpecsForUpdateChannel({
         spec: candidate.clawhubSpec,
@@ -527,9 +617,6 @@ async function installCandidate(params: {
       extensionsDir,
       expectedPluginId: candidate.pluginId,
       mode: "install",
-      logger: {
-        warn: (message) => warnings.push(message),
-      },
     });
     if (clawhubResult.ok) {
       const pluginId = clawhubResult.pluginId;
@@ -544,7 +631,7 @@ async function installCandidate(params: {
           },
         },
         changes: [`Installed missing configured plugin "${pluginId}" from ${clawhubInstallSpec}.`],
-        warnings,
+        warnings: [],
       };
     }
     if (!npmInstallSpec || !shouldFallbackClawHubToNpm(clawhubResult)) {
@@ -552,7 +639,6 @@ async function installCandidate(params: {
         records: params.records,
         changes: [],
         warnings: [
-          ...warnings,
           `Failed to install missing configured plugin "${candidate.pluginId}" from ${clawhubInstallSpec}: ${clawhubResult.error}`,
         ],
       };
@@ -566,7 +652,6 @@ async function installCandidate(params: {
       records: params.records,
       changes: [],
       warnings: [
-        ...warnings,
         `Failed to install missing configured plugin "${candidate.pluginId}": missing npm spec.`,
       ],
     };
@@ -586,7 +671,6 @@ async function installCandidate(params: {
       records: params.records,
       changes: [],
       warnings: [
-        ...warnings,
         `Failed to install missing configured plugin "${candidate.pluginId}" from ${npmInstallSpec}: ${result.error}`,
       ],
     };
@@ -608,7 +692,7 @@ async function installCandidate(params: {
       ...changes,
       `Installed missing configured plugin "${pluginId}" from ${npmInstallSpec}.`,
     ],
-    warnings,
+    warnings: [],
   };
 }
 

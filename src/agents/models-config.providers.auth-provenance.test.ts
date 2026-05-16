@@ -2,6 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureEnv } from "../test-utils/env.js";
 
 vi.mock("../plugins/provider-runtime.js", () => ({
+  normalizeProviderConfigWithPlugin: vi.fn(
+    (params: { context?: { providerConfig?: unknown } }) => params.context?.providerConfig,
+  ),
   resolveProviderSyntheticAuthWithPlugin: vi.fn(),
 }));
 
@@ -334,7 +337,7 @@ describe("models-config provider auth provenance", () => {
           providers: {
             vllm: {
               baseUrl: "http://127.0.0.1:8000/v1",
-              apiKey: "MY_VLLM_KEY",
+              apiKey: "${MY_VLLM_KEY}",
               api: "openai-completions",
               models: [],
             },
@@ -346,6 +349,60 @@ describe("models-config provider auth provenance", () => {
     expect(auth("vllm")).toEqual({
       apiKey: undefined,
       discoveryApiKey: undefined,
+    });
+  });
+
+  it("does not send missing known provider env markers as catalog discovery keys", () => {
+    const auth = createProviderApiKeyResolver(
+      {} as NodeJS.ProcessEnv,
+      {
+        version: 1,
+        profiles: {},
+      },
+      {
+        models: {
+          providers: {
+            vllm: {
+              baseUrl: "http://127.0.0.1:8000/v1",
+              apiKey: "VLLM_API_KEY",
+              api: "openai-completions",
+              models: [],
+            },
+          },
+        },
+      },
+    );
+
+    expect(auth("vllm")).toEqual({
+      apiKey: undefined,
+      discoveryApiKey: undefined,
+    });
+  });
+
+  it("preserves bare all-caps configured api keys as literal catalog discovery keys", () => {
+    const auth = createProviderApiKeyResolver(
+      {} as NodeJS.ProcessEnv,
+      {
+        version: 1,
+        profiles: {},
+      },
+      {
+        models: {
+          providers: {
+            vllm: {
+              baseUrl: "http://127.0.0.1:8000/v1",
+              apiKey: "ALLCAPS_SAMPLE",
+              api: "openai-completions",
+              models: [],
+            },
+          },
+        },
+      },
+    );
+
+    expect(auth("vllm")).toEqual({
+      apiKey: "ALLCAPS_SAMPLE",
+      discoveryApiKey: "ALLCAPS_SAMPLE",
     });
   });
 

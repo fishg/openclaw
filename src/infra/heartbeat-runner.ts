@@ -1556,13 +1556,14 @@ export async function runHeartbeatOnce(opts: {
     runSessionKey === sessionKey
       ? preflight.pendingEventEntries
       : peekSystemEventEntries(runSessionKey);
-  const hasUntrustedInspectedEvents =
+  const hasInspectedOwnerDowngradeEvents =
     preflight.shouldInspectPendingEvents &&
-    preflight.pendingEventEntries.some((event) => event.trusted === false);
-  const hasUntrustedActiveSessionEvents = activeSessionPendingEventEntries.some(
-    (event) => event.trusted === false,
+    preflight.pendingEventEntries.some((event) => event.forceSenderIsOwnerFalse === true);
+  const hasActiveSessionOwnerDowngradeEvents = activeSessionPendingEventEntries.some(
+    (event) => event.forceSenderIsOwnerFalse === true,
   );
-  const hasUntrustedPendingEvents = hasUntrustedInspectedEvents || hasUntrustedActiveSessionEvents;
+  const hasOwnerDowngradeSystemEvents =
+    hasInspectedOwnerDowngradeEvents || hasActiveSessionOwnerDowngradeEvents;
 
   // Update task last run times AFTER successful heartbeat completion
   const updateTaskTimestamps = async () => {
@@ -1613,7 +1614,7 @@ export async function runHeartbeatOnce(opts: {
     MessageThreadId: delivery.threadId,
     Provider: hasExecCompletion ? "exec-event" : hasCronEvents ? "cron-event" : "heartbeat",
     SessionKey: runSessionKey,
-    ForceSenderIsOwnerFalse: hasExecCompletion || hasUntrustedPendingEvents,
+    ForceSenderIsOwnerFalse: hasExecCompletion || hasOwnerDowngradeSystemEvents,
   };
   if (!visibility.showAlerts && !visibility.showOk && !visibility.useIndicator) {
     emitHeartbeatEvent({

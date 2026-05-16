@@ -20,12 +20,8 @@ let stopped = false;
 let activeController: AbortController | undefined;
 
 function post(message: TelegramIngressWorkerMessage): void {
-  const port = parentPort;
-  if (port === null) {
-    return;
-  }
-  // Node worker_threads ports do not support the browser targetOrigin argument.
-  port["postMessage"](message);
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node worker_threads ports do not accept a targetOrigin argument.
+  parentPort?.postMessage(message);
 }
 
 function sleep(ms: number): Promise<void> {

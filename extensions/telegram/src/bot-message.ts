@@ -72,6 +72,29 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
     telegramDeps,
     opts,
   } = deps;
+  const sessionRuntime = {
+    ...(telegramDeps.buildChannelTurnContext
+      ? { buildChannelTurnContext: telegramDeps.buildChannelTurnContext }
+      : {}),
+    ...(telegramDeps.readSessionUpdatedAt
+      ? { readSessionUpdatedAt: telegramDeps.readSessionUpdatedAt }
+      : {}),
+    ...(telegramDeps.recordInboundSession
+      ? { recordInboundSession: telegramDeps.recordInboundSession }
+      : {}),
+    ...(telegramDeps.resolveInboundLastRouteSessionKey
+      ? { resolveInboundLastRouteSessionKey: telegramDeps.resolveInboundLastRouteSessionKey }
+      : {}),
+    ...(telegramDeps.resolvePinnedMainDmOwnerFromAllowlist
+      ? {
+          resolvePinnedMainDmOwnerFromAllowlist: telegramDeps.resolvePinnedMainDmOwnerFromAllowlist,
+        }
+      : {}),
+    resolveStorePath: telegramDeps.resolveStorePath,
+  };
+  const contextRuntime = telegramDeps.recordChannelActivity
+    ? { recordChannelActivity: telegramDeps.recordChannelActivity }
+    : undefined;
 
   return async (
     primaryCtx: TelegramContext,
@@ -118,6 +141,8 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
       resolveTelegramGroupConfig,
       sendChatActionHandler,
       loadFreshConfig,
+      runtime: contextRuntime,
+      sessionRuntime,
       upsertPairingRequest: telegramDeps.upsertChannelPairingRequest,
     });
     if (!context) {
@@ -136,16 +161,11 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
           (options?.ingressBuffer ? ` buffer=${options.ingressBuffer}` : ""),
       );
     }
-    if (context.isGroup) {
-      runtime.log?.(
-        `[telegram][inbound] dispatch-start account=${context.accountId} chat=${context.chatId}` +
-          ` sessionKey=${context.route.sessionKey}` +
-          (context.resolvedThreadId != null ? ` thread=${context.resolvedThreadId}` : ""),
-      );
+    if (context.ctxPayload.InboundTurnKind !== "room_event") {
+      void context.sendTyping().catch((err) => {
+        logVerbose(`telegram early typing cue failed for chat ${context.chatId}: ${String(err)}`);
+      });
     }
-    void context.sendTyping().catch((err) => {
-      logVerbose(`telegram early typing cue failed for chat ${context.chatId}: ${String(err)}`);
-    });
     telegramInboundLog.info(
       formatTelegramInboundLogLine({
         from: context.ctxPayload.From,
