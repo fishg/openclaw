@@ -5,6 +5,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { CliDeps } from "../cli/deps.types.js";
 import type { GatewayTailscaleMode } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { listAgentIds } from "../agents/agent-scope.js";
+import { loadConfig } from "../config/io.js";
 import { hasConfiguredInternalHooks } from "../hooks/configured.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import type { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
@@ -376,6 +378,45 @@ function schedulePrimaryModelPrewarm(
   });
 }
 
+function scheduleDefaultModelResolutionPrewarm(params: {
+  cfg: OpenClawConfig;
+  log: { warn: (msg: string) => void };
+}): void {
+  if (shouldSkipStartupModelPrewarm()) {
+    return;
+  }
+  // Collect all agent IDs that need warming: undefined (default) + named agents from cfg.agents.list.
+  const namedAgentIds = listAgentIds(params.cfg);
+  const agentIds: Array<string | undefined> = [undefined, ...namedAgentIds];
+
+  // Schedule asynchronously after startup settles, yield between agents so the
+  // event loop stays responsive if there are many agents.
+  void (async () => {
+    try {
+      // Yield once to let channel startup finish.
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      // Load model catalog first so resolveDefaultModel cache entries are built
+      // with the full catalog context and match subsequent request-time lookups.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const { loadModelCatalog } = await import("../agents/model-catalog.js");
+      // Use the pinned runtime config (same instance as request handlers) so the
+      // resolveDefaultModel cache key matches subsequent request-time lookups.
+      const runtimeCfg = loadConfig();
+      await loadModelCatalog({ config: runtimeCfg });
+      const { resolveDefaultModel } = await import(
+        "../auto-reply/reply/directive-handling.defaults.js"
+      );
+      for (const agentId of agentIds) {
+        // Yield before each call so incoming requests can be processed first.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        resolveDefaultModel({ cfg: runtimeCfg, agentId });
+      }
+    } catch (err) {
+      params.log.warn(`model-resolution prewarm failed: ${String(err)}`);
+    }
+  })();
+}
+
 export async function startGatewaySidecars(params: {
   cfg: OpenClawConfig;
   pluginRegistry: ReturnType<typeof loadOpenClawPlugins>;
@@ -485,6 +526,7 @@ export async function startGatewaySidecars(params: {
         await measureStartup(params.startupTrace, "sidecars.channel-start", () =>
           params.startChannels(),
         );
+        scheduleDefaultModelResolutionPrewarm({ cfg: params.cfg, log: params.log });
       } catch (err) {
         params.logChannels.error(`channel startup failed: ${String(err)}`);
       }

@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { TypingCallbacks } from "../../channels/typing.js";
 import type { HumanDelayConfig } from "../../config/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -34,7 +35,10 @@ export type ReplyDispatchBeforeDeliver = (
 
 const DEFAULT_HUMAN_DELAY_MIN_MS = 800;
 const DEFAULT_HUMAN_DELAY_MAX_MS = 2500;
+// Log a warning when the event loop held a reply in the queue longer than this.
+const DISPATCH_LAG_WARN_MS = 200;
 const silentReplyLogger = createSubsystemLogger("silent-reply/dispatcher");
+const dispatchLagLogger = createSubsystemLogger("auto-reply/dispatch-lag");
 
 /** Generate a random delay within the configured range. */
 function getHumanDelay(config: HumanDelayConfig | undefined): number {
@@ -181,8 +185,17 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
       sentFirstBlock = true;
     }
 
+    const enqueuedAt = performance.now();
+
     sendChain = sendChain
       .then(async () => {
+        const lagMs = Math.round(performance.now() - enqueuedAt);
+        if (lagMs >= DISPATCH_LAG_WARN_MS) {
+          dispatchLagLogger.warn(
+            `dispatch lag: kind=${kind} lagMs=${lagMs}ms — event loop blocked before reply could be sent`,
+          );
+        }
+
         // Add human-like delay between block replies for natural rhythm.
         if (shouldDelay) {
           const delayMs = getHumanDelay(options.humanDelay);
@@ -192,13 +205,25 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
         }
         let deliverPayload: ReplyPayload | null = normalized;
         if (options.beforeDeliver) {
+          const beforeDeliverAt = performance.now();
           deliverPayload = await options.beforeDeliver(normalized, { kind });
+          const beforeDeliverMs = Math.round(performance.now() - beforeDeliverAt);
+          if (beforeDeliverMs >= DISPATCH_LAG_WARN_MS) {
+            dispatchLagLogger.warn(
+              `beforeDeliver slow: kind=${kind} durationMs=${beforeDeliverMs}ms`,
+            );
+          }
           if (!deliverPayload) {
             cancelledCounts[kind] += 1;
             return;
           }
         }
+        const deliverAt = performance.now();
         await options.deliver(deliverPayload, { kind });
+        const deliverMs = Math.round(performance.now() - deliverAt);
+        if (deliverMs >= DISPATCH_LAG_WARN_MS) {
+          dispatchLagLogger.warn(`deliver slow: kind=${kind} durationMs=${deliverMs}ms`);
+        }
       })
       .catch((err) => {
         failedCounts[kind] += 1;

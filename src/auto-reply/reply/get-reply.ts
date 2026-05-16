@@ -27,6 +27,8 @@ import type { MsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import { resolveDefaultModel } from "./directive-handling.defaults.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
+const getReplyTimingLogger = createSubsystemLogger("get-reply/timing");
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { resolveReplyDirectives } from "./get-reply-directives.js";
 import {
@@ -246,10 +248,17 @@ export async function getReplyFromConfig(
     mergedSkillFilter !== undefined ? { ...opts, skillFilter: mergedSkillFilter } : opts;
   const agentCfg = cfg.agents?.defaults;
   const sessionCfg = cfg.session;
+  const getReplyT0 = Date.now();
   const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
     cfg,
     agentId,
   });
+  const markPhase = (phase: string) => {
+    const elapsed = Date.now() - getReplyT0;
+    if (elapsed >= 500) {
+      getReplyTimingLogger.warn(`phase=${phase} elapsed=${elapsed}ms agentId=${agentId ?? "n/a"}`);
+    }
+  };
   let provider = defaultProvider;
   let model = defaultModel;
   let hasResolvedHeartbeatModelOverride = false;
@@ -315,6 +324,7 @@ export async function getReplyFromConfig(
   if (nativeSlashCommandFastReply.handled) {
     return nativeSlashCommandFastReply.reply;
   }
+  markPhase("after-native-slash-command");
 
   const workspace = await traceGetReplyPhase("reply.ensure_workspace", async () =>
     useFastTestBootstrap
@@ -326,6 +336,7 @@ export async function getReplyFromConfig(
         }),
   );
   const workspaceDir = workspace.dir;
+  markPhase("after-ensure-workspace");
 
   if (!isFastTestEnv && hasInboundMedia(finalized)) {
     await traceGetReplyPhase("reply.apply_media_understanding", () =>
@@ -367,6 +378,7 @@ export async function getReplyFromConfig(
           commandAuthorized,
         }),
       );
+  markPhase("after-init-session-state");
   let {
     sessionCtx,
     sessionEntry,
@@ -623,6 +635,7 @@ export async function getReplyFromConfig(
     );
   }
 
+  markPhase("before-resolve-directives");
   const directiveResult = await traceGetReplyPhase("reply.resolve_directives", () =>
     resolveReplyDirectives({
       ctx: finalized,
@@ -655,6 +668,7 @@ export async function getReplyFromConfig(
       skillFilter: mergedSkillFilter,
     }),
   );
+  markPhase("after-resolve-directives");
   if (directiveResult.kind === "reply") {
     return directiveResult.reply;
   }

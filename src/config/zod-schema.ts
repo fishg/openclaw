@@ -456,6 +456,8 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        slowCallbackTracerMs: z.number().int().nonnegative().optional(),
+        slowCallbackTracerStack: z.boolean().optional(),
       })
       .strict()
       .optional(),

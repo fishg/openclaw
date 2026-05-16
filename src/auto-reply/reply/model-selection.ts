@@ -23,6 +23,7 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { ThinkLevel } from "./directives.js";
 export {
   resolveModelDirectiveSelection,
@@ -75,6 +76,7 @@ function shouldLogModelSelectionTiming(): boolean {
 const modelCatalogRuntimeLoader = createLazyImportLoader(
   () => import("../../agents/model-catalog.runtime.js"),
 );
+const modelSelectionTimingLogger = createSubsystemLogger("model-selection/timing");
 const sessionStoreRuntimeLoader = createLazyImportLoader(
   () => import("../../config/sessions/store.runtime.js"),
 );
@@ -181,7 +183,14 @@ export async function createModelSelectionState(params: {
   });
 
   if (needsModelCatalog) {
+    const catalogT0 = Date.now();
     modelCatalog = await (await loadModelCatalogRuntime()).loadModelCatalog({ config: cfg });
+    const catalogMs = Date.now() - catalogT0;
+    if (catalogMs >= 200) {
+      modelSelectionTimingLogger.warn(
+        `loadModelCatalog slow: agentId=${params.agentId ?? "n/a"} durationMs=${catalogMs} entries=${modelCatalog.length}`,
+      );
+    }
     logStage("catalog-loaded", `entries=${modelCatalog.length}`);
     visibilityPolicy = createModelVisibilityPolicy({
       cfg,

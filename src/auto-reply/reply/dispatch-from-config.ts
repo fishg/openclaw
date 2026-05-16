@@ -34,6 +34,7 @@ import { appendAssistantMessageToSessionTranscript } from "../../config/sessions
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { fireAndForgetHook } from "../../hooks/fire-and-forget.js";
 import {
   deriveInboundMessageHookContext,
@@ -111,6 +112,8 @@ import {
   resolveSourceReplyVisibilityPolicy,
 } from "./source-reply-delivery-mode.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
+
+const pipelineTimingLogger = createSubsystemLogger("dispatch/pipeline-timing");
 
 const routeReplyRuntimeLoader = createLazyImportLoader(() => import("./route-reply.runtime.js"));
 const getReplyFromConfigRuntimeLoader = createLazyImportLoader(
@@ -398,6 +401,8 @@ export async function dispatchReplyFromConfig(
   const sessionKey =
     normalizeOptionalString(ctx.SessionKey) ?? normalizeOptionalString(ctx.CommandTargetSessionKey);
   const startTime = diagnosticsEnabled ? Date.now() : 0;
+  const pipelineStartMs = Date.now();
+  pipelineTimingLogger.warn(`[pipeline] dispatch-start channel=${channel} session=${sessionKey ?? "none"} chat=${String(chatId ?? "")}`);
   const canTrackSession = diagnosticsEnabled && Boolean(sessionKey);
   const traceAttributes = {
     surface: channel,
@@ -1340,6 +1345,8 @@ export async function dispatchReplyFromConfig(
     const replyConfig = withFullRuntimeReplyConfig(
       params.configOverride ? (applyMergePatch(cfg, params.configOverride) as OpenClawConfig) : cfg,
     );
+    const replyResolverStartMs = Date.now();
+    pipelineTimingLogger.warn(`[pipeline] reply-resolver-start channel=${channel} session=${sessionKey ?? "none"} elapsed=${Date.now() - pipelineStartMs}ms`);
     const replyResult = await traceReplyPhase("reply.run_reply_resolver", () =>
       replyResolver(
         ctx,
@@ -1588,6 +1595,7 @@ export async function dispatchReplyFromConfig(
       }
     }
 
+    pipelineTimingLogger.warn(`[pipeline] reply-resolver-done channel=${channel} session=${sessionKey ?? "none"} resolverMs=${Date.now() - replyResolverStartMs}ms totalMs=${Date.now() - pipelineStartMs}ms`);
     const replies = replyResult ? (Array.isArray(replyResult) ? replyResult : [replyResult]) : [];
     const beforeAgentRunBlocked = replies.some(
       (reply) => getReplyPayloadMetadata(reply)?.beforeAgentRunBlocked === true,

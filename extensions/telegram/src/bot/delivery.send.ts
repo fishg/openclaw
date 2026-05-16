@@ -115,6 +115,7 @@ export async function sendTelegramText(
   const fallbackText = opts?.plainText ?? text;
   const hasFallbackText = fallbackText.trim().length > 0;
   const sendPlainFallback = async () => {
+    runtime.log?.(`telegram sendMessage start chat=${chatId} (plain)`);
     const res = await sendTelegramWithThreadFallback({
       operation: "sendMessage",
       runtime,
@@ -138,6 +139,7 @@ export async function sendTelegramText(
     }
     return await sendPlainFallback();
   }
+  runtime.log?.(`telegram sendMessage start chat=${chatId}`);
   try {
     const res = await sendTelegramWithThreadFallback({
       operation: "sendMessage",

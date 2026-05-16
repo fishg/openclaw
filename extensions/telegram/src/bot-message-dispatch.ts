@@ -111,6 +111,7 @@ export { pruneStickerMediaFromContext } from "./bot-message-dispatch.media.js";
 
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
 const silentReplyDispatchLogger = createSubsystemLogger("telegram/silent-reply-dispatch");
+const pipelineTimingLogger = createSubsystemLogger("telegram/pipeline-timing");
 
 /** Minimum chars before sending first streaming message (improves push notification UX) */
 const DRAFT_MIN_INITIAL_CHARS = 30;
@@ -466,6 +467,7 @@ export const dispatchTelegramMessage = async ({
     removeAckAfterReply,
     statusReactionController: rawStatusReactionController,
   } = context;
+  pipelineTimingLogger.warn(`[pipeline] dispatch-start chatId=${String(chatId)} elapsed=0ms`);
   const isRoomEvent = ctxPayload.InboundTurnKind === "room_event";
   const statusReactionController = isRoomEvent ? null : rawStatusReactionController;
   const statusReactionTiming = {
@@ -1306,6 +1308,7 @@ export const dispatchTelegramMessage = async ({
     });
 
     try {
+      pipelineTimingLogger.warn(`[pipeline] inbound-turn-start chatId=${String(chatId)} elapsed=${Date.now() - dispatchStartedAt}ms`);
       const turnResult = await runInboundReplyTurn({
         channel: "telegram",
         accountId: route.accountId,
@@ -1730,6 +1733,7 @@ export const dispatchTelegramMessage = async ({
           }),
         },
       });
+      pipelineTimingLogger.warn(`[pipeline] inbound-turn-done chatId=${String(chatId)} dispatched=${turnResult.dispatched} elapsed=${Date.now() - dispatchStartedAt}ms`);
       if (!turnResult.dispatched) {
         if (isGroup) {
           runtime.log?.(
