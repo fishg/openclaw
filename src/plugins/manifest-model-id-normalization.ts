@@ -3,6 +3,7 @@ import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { getCurrentPluginMetadataSnapshot } from "./current-plugin-metadata-snapshot.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 import type { PluginManifestModelIdNormalizationProvider } from "./manifest.js";
+import { resolvePluginControlPlaneFingerprint } from "./plugin-control-plane-context.js";
 import {
   loadPluginMetadataSnapshot,
   type PluginMetadataSnapshot,
@@ -30,6 +31,7 @@ function collectManifestModelIdNormalizationPolicies(
 
 type ManifestModelIdNormalizationPolicyCache = {
   configFingerprint: string;
+  earlyCacheKey: string;
   policies: Map<string, PluginManifestModelIdNormalizationProvider>;
 };
 
@@ -40,29 +42,23 @@ export function resetManifestModelIdNormalizationPoliciesCache(): void {
 }
 
 function resolveMetadataSnapshotForPolicies(
-  params: ManifestModelIdNormalizationLookupParams = {},
-): {
-  snapshot: PluginMetadataSnapshot;
-  cacheable: boolean;
-} {
-  const env = params.env ?? process.env;
-  const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
+  params: ManifestModelIdNormalizationLookupParams,
+  env: NodeJS.ProcessEnv,
+  workspaceDir: string | undefined,
+): PluginMetadataSnapshot {
   const current = getCurrentPluginMetadataSnapshot({
     config: params.config,
     env,
     workspaceDir,
   });
   if (current) {
-    return { snapshot: current, cacheable: true };
+    return current;
   }
-  return {
-    snapshot: loadPluginMetadataSnapshot({
-      config: params.config ?? {},
-      env,
-      workspaceDir,
-    }),
-    cacheable: false,
-  };
+  return loadPluginMetadataSnapshot({
+    config: params.config ?? {},
+    env,
+    workspaceDir,
+  });
 }
 
 function loadManifestModelIdNormalizationPolicies(
@@ -71,14 +67,29 @@ function loadManifestModelIdNormalizationPolicies(
   if (params.plugins) {
     return collectManifestModelIdNormalizationPolicies(params.plugins);
   }
-  const { snapshot, cacheable } = resolveMetadataSnapshotForPolicies(params);
+  const env = params.env ?? process.env;
+  const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
+  // Compute a cheap fingerprint from params alone (no snapshot load) to check the cache first.
+  // This avoids calling loadPluginMetadataSnapshot on every model normalization call.
+  const earlyCacheKey = resolvePluginControlPlaneFingerprint({
+    config: params.config,
+    env,
+    workspaceDir,
+  });
+  if (earlyCacheKey && cachedPolicies?.earlyCacheKey === earlyCacheKey) {
+    return cachedPolicies.policies;
+  }
+  const snapshot = resolveMetadataSnapshotForPolicies(params, env, workspaceDir);
   const configFingerprint = snapshot.configFingerprint;
-  if (cacheable && configFingerprint && cachedPolicies?.configFingerprint === configFingerprint) {
+  if (configFingerprint && cachedPolicies?.configFingerprint === configFingerprint) {
+    if (earlyCacheKey) {
+      cachedPolicies = { ...cachedPolicies, earlyCacheKey };
+    }
     return cachedPolicies.policies;
   }
   const policies = collectManifestModelIdNormalizationPolicies(snapshot.plugins);
-  if (cacheable && configFingerprint) {
-    cachedPolicies = { configFingerprint, policies };
+  if (configFingerprint) {
+    cachedPolicies = { configFingerprint, earlyCacheKey: earlyCacheKey || "", policies };
   }
   return policies;
 }

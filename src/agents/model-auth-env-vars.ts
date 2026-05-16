@@ -36,7 +36,24 @@ export function resolveProviderEnvAuthLookupKeys(params?: ProviderEnvVarLookupPa
   });
 }
 
-export const PROVIDER_ENV_API_KEY_CANDIDATES = resolveProviderEnvApiKeyCandidates();
+let _providerEnvApiKeyCandidates: Record<string, readonly string[]> | undefined;
+export const PROVIDER_ENV_API_KEY_CANDIDATES: Record<string, readonly string[]> = new Proxy(
+  {} as Record<string, readonly string[]>,
+  {
+    get(_, key: string | symbol) {
+      _providerEnvApiKeyCandidates ??= resolveProviderEnvApiKeyCandidates();
+      return (_providerEnvApiKeyCandidates as Record<string | symbol, unknown>)[key];
+    },
+    ownKeys() {
+      _providerEnvApiKeyCandidates ??= resolveProviderEnvApiKeyCandidates();
+      return Reflect.ownKeys(_providerEnvApiKeyCandidates);
+    },
+    getOwnPropertyDescriptor(_, key: string | symbol) {
+      _providerEnvApiKeyCandidates ??= resolveProviderEnvApiKeyCandidates();
+      return Object.getOwnPropertyDescriptor(_providerEnvApiKeyCandidates, key);
+    },
+  },
+);
 
 export function listKnownProviderEnvApiKeyNames(): string[] {
   return listKnownProviderAuthEnvVarNames();
