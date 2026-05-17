@@ -1602,15 +1602,7 @@ export const dispatchTelegramMessage = async ({
                           streamToolProgressSuppressed = false;
                           streamToolProgressLines = [];
                           if (answerLane.finalized) {
-                            // Clean end (finish_reason:stop): rotate to a fresh Telegram message.
                             await rotateLaneForNewMessage(answerLane);
-                          } else if (answerLane.hasStreamedMessage) {
-                            // Tool-call round ended without finalization (finish_reason:tool_calls).
-                            // Reset the accumulated delta buffer so the next streaming turn starts
-                            // fresh, but keep the SAME draft message so it edits in place rather
-                            // than posting a duplicate Telegram message.
-                            lastAnswerPartialText = "";
-                            answerLane.lastPartialText = "";
                           }
                         })
                     : undefined,
